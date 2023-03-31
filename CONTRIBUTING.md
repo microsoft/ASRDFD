@@ -15,17 +15,17 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 ## Reporting Issues
 Please open a new issue to describe the problem and suggestions to address the problem. You may also open an issue for asking questions and seeking help from the project community.
 
-**_NOTE:_** If your issue is related to a security vulnerability, please follow the guidelines mentioned in the [Security](SECURITY.md) file. 
+**_NOTE:_** If your issue is related to a security vulnerability, please follow the guidelines mentioned in the [Security](SECURITY.md) file.
 
 ## Branching Guidelines
 We have 3 tags associated with the code
-1. Main - this is where all the active development happens. New PRs are merged from the feature branches to the master branch.
-2. Release - this branch tracks the release candidate. Based on the release content, the release branch is cutoff from the master branch and is subjected to additional testing. 
-3. Stable - Release branch is promoted to a stable tag after testing completes. Please use the stable tag for the most stable version of the project.
-	
+1. Main - this is where all the active development happens. New PRs are merged from the feature branches to the **main** branch.
+2. Release - this branch tracks the release candidate. Based on the release content, the **release** branch is cutoff from the **main** branch and is subjected to additional testing.
+3. Stable - **Release** branch is promoted to a stable tag after testing completes. Please use the **stable** tag for the most stable version of the project.
+
 ## Contributing to Source Code
 Here are a set of guidelines for contributing code to the project:
-1. Please create a separate feature branch forking off from the master branch with your code changes.
+1. Please create a separate feature branch forking off from the main branch with your code changes.
 2. Please follow the Linux kernel coding style for any code changes - https://www.kernel.org/doc/html/v4.10/process/coding-style.html
 **_DISCLAIMER:_** We are working towards aligning the existing code repository to the coding style mentioned above. Therefore, you may observe discrepancy between the existing coding style vs the Linux kernel coding style. Please be assured that we are actively working on fixing this discrepancy in order to make it ready for upstream. However - we expect all new code changes to adhere to the coding style mentioned above.
 3. Please submit the PR describing the fix and the tests that were run to validate the fix. The maintainers will get in touch with you wrt your PR. If you dont receive a response within a reasonable time, please feel free to email the maintainers.
