@@ -3504,11 +3504,6 @@ inm_s32_t __init involflt_init(void)
 	init_boottime_stacking();
 	driver_ctx->flags &= ~DC_FLAGS_INVOLFLT_LOAD;
 	
-	info("The involflt module is of license 'Propreitary' one and is supposed "
-			"to taint the kernel. So the messages like 'loading out-of-tree module "
-			"taints kernel' or 'module license Propreitary taints kernel' can be "
-			"ignored safely");
-
 	if (driver_state & DRV_LOADED_FULLY) {
 		if (driver_ctx->clean_shutdown)
 		inm_flush_clean_shutdown(UNCLEAN_SHUTDOWN); 
@@ -3678,7 +3673,7 @@ inm_cleanup_mirror_bufinfo(host_dev_ctx_t *hdcp)
 module_init(involflt_init);
 module_exit(involflt_exit);
 
-MODULE_AUTHOR("InMage Systems Pvt Ltd");
-MODULE_DESCRIPTION("InMage Filter Driver");
+MODULE_AUTHOR("Microsoft Corporation");
+MODULE_DESCRIPTION("Microsoft Filter Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION(BLD_DATE " [ " BLD_TIME " ]");
