@@ -578,7 +578,7 @@ ssize_t inm_chained_io_read(char *fname)
 	}
 
 set_default:
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	driver_ctx->tunable_params.enable_chained_io = 1;
 #else
 	driver_ctx->tunable_params.enable_chained_io = 0;
@@ -2625,6 +2625,8 @@ inm_s32_t vol_flt_disabled_store(target_context_t *ctxt, char * file_name, const
 		return -EINVAL;
 	} else {
 		volume_lock(ctxt);
+		info("Setting filtering disabled flag : %d, process id = %d, process name = %s",
+			val, INM_CURPROC_PID, INM_CURPROC_COMM);
 		if(val)
 			ctxt->tc_flags |= VCF_FILTERING_STOPPED;
 		else

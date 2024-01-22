@@ -192,13 +192,14 @@ inm_s32_t queue_worker_routine_for_set_volume_out_of_sync(target_context_t *vcpt
 	if (!vcptr) {
 		return -EINVAL;
 	}
-	wqe = alloc_work_queue_entry(INM_KM_NOSLEEP);
 
+	vcptr->tc_resync_required = TRUE;
+	vcptr->tc_out_of_sync_err_code = out_of_sync_error_code;
+	vcptr->tc_nr_out_of_sync++;
+
+	wqe = alloc_work_queue_entry(INM_KM_NOSLEEP);
 	if (!wqe) {
 		telemetry_set_dbs(&vcptr->tc_tel.tt_blend, DBS_DRIVER_RESYNC_REQUIRED);
-		vcptr->tc_resync_required = TRUE;
-		vcptr->tc_out_of_sync_err_code = out_of_sync_error_code;
-		vcptr->tc_nr_out_of_sync++;
 		info("failed to allocate work queue entry\n");
 		return -ENOMEM;
 	}

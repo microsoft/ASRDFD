@@ -92,7 +92,7 @@ static int tel_shutdown = 0;        /* Indicated telemetry shutdown         */
 				                                                            	\
 		dbg("Written %d bytes", TELEMETRY_REC_CUR_WRITTEN(l));              		\
 		if (TELEMETRY_REC_CUR_WRITTEN(l) == -1)                             		\
-			telemetry_rec_alloc(l);                                         	\
+			telemetry_rec_alloc(l, NOT_IN_IO_PATH);                                 \
 		else                                                                		\
 			TELEMETRY_REC_CUR_LEN(l) += TELEMETRY_REC_CUR_WRITTEN(l);       	\
 				                                                            	\
@@ -196,12 +196,13 @@ telemetry_free_rec_list(inm_list_head_t *tel_data)
 }
 
 static tel_rec_t *
-__telemetry_rec_alloc(inm_u64_t event_id) 
+__telemetry_rec_alloc(inm_u64_t event_id, int path) 
 {
 	int alloc = 0;
 	void *tel_buf = NULL;
 	tel_rec_t *rec = NULL;
 	static int mem_throttled = 0;
+	inm_s32_t alloc_flag;
 
 	INM_SPIN_LOCK(&tel_slock);
 	if (tel_nrecs < 
@@ -222,8 +223,13 @@ __telemetry_rec_alloc(inm_u64_t event_id)
 	INM_SPIN_UNLOCK(&tel_slock);
 
 	if (alloc) {
-		tel_buf = (void *)__INM_GET_FREE_PAGE(INM_KM_SLEEP | 
-						INM_KM_NOIO, INM_KERNEL_HEAP);
+		alloc_flag = INM_KM_SLEEP;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0) && !defined(SLES15SP3)
+		if (path == IN_IOBARRIER_PATH)
+			alloc_flag = INM_KM_NOIO;
+#endif
+		tel_buf = (void *)__INM_GET_FREE_PAGE(alloc_flag,
+							INM_KERNEL_HEAP);
 		if (!tel_buf) {
 			err("Error allocating telemetry buffer");
 			INM_SPIN_LOCK(&tel_slock);
@@ -243,7 +249,7 @@ __telemetry_rec_alloc(inm_u64_t event_id)
 }
 
 static inm_s32_t 
-telemetry_rec_alloc(inm_list_head_t *rec_list)
+telemetry_rec_alloc(inm_list_head_t *rec_list, int path)
 {
 	inm_s32_t error = 0;
 	tel_rec_t *rec = NULL;
@@ -260,7 +266,7 @@ telemetry_rec_alloc(inm_list_head_t *rec_list)
 		event_id = TELEMETRY_REC_CUR_SEQ(rec_list);
 	}
 	
-	rec = __telemetry_rec_alloc(event_id);
+	rec = __telemetry_rec_alloc(event_id, path);
 	if (!rec) {
 		telemetry_free_rec_list(rec_list);
 		telemetry_log_rec_drop(error, event_id, event_id);
@@ -521,14 +527,14 @@ telemetry_log_end(inm_list_head_t *rec_list)
 }
 
 static inm_s32_t
-telemetry_log_start(inm_list_head_t *rec_list)
+telemetry_log_start(inm_list_head_t *rec_list, int path)
 {
 	inm_s32_t error = 0;
 	inm_u64_t ltime = 0;
 
 	INM_INIT_LIST_HEAD(rec_list);
 
-	error = telemetry_rec_alloc(rec_list);
+	error = telemetry_rec_alloc(rec_list, path);
 	if (error)
 		goto out;
 
@@ -591,7 +597,7 @@ telemetry_log_tag_history(change_node_t *chg_node,
 
 	tag_common = tag_hist->th_tag_common;
 
-	error = telemetry_log_start(recs);
+	error = telemetry_log_start(recs, NOT_IN_IO_PATH);
 	if (error) 
 		goto out;
 
@@ -807,7 +813,7 @@ telemetry_log_tag_failure(target_context_t *ctxt,
 	if (!tag_common)
 		goto out;
 
-	error = telemetry_log_start(recs);
+	error = telemetry_log_start(recs, IN_IOBARRIER_PATH);
 	if (error) 
 		goto out;
 
@@ -1008,7 +1014,7 @@ telemetry_log_ioctl_failure(tag_telemetry_common_t *tag_common,
 	if (!tag_common)
 		goto out;
 
-	error = telemetry_log_start(recs);
+	error = telemetry_log_start(recs, IN_IOCTL_PATH);
 	if (error)
 		goto out;
 

@@ -329,7 +329,9 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 	INM_ATOMIC_SET(&(ctx->tc_nr_chain_bios_pending), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_completed_in_child_stack), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_completed_in_own_stack), 0);
-
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
+	INM_ATOMIC_SET(&(ctx->tc_nr_write_zero_bios), 0);
+#endif
 	INM_ATOMIC_SET(&(ctx->tc_async_bufs_pending), 0);
 	INM_ATOMIC_SET(&(ctx->tc_async_bufs_processed), 0);
 	INM_ATOMIC_SET(&(ctx->tc_async_bufs_write_pending), 0);
@@ -371,6 +373,7 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 			ctx->tc_guid, err);
 			goto ret3;
 		}
+		info("set filter_dev_type to %d", ctx->tc_dev_type);
 	}
 
 	/* Allocate tc'c reservations from dc's unreserved pages */
@@ -623,6 +626,34 @@ wake_up_tc_state(target_context_t *tgt_ctx)
 		INM_UP(&tgt_ctx->cdw_sem);
 		INM_COMPLETE(&cdw_item->wait);
 	}
+}
+
+target_context_t *
+get_tgt_ctxt_from_device_name_locked(char *uuid)
+{
+	struct inm_list_head *ptr;
+	target_context_t *tgt_ctxt = NULL;
+
+retry:
+	for(ptr = driver_ctx->tgt_list.next; ptr != &(driver_ctx->tgt_list);
+		ptr = ptr->next, tgt_ctxt = NULL) {
+		tgt_ctxt = inm_list_entry(ptr, target_context_t, tc_list);
+		dbg("get_tgt_ctxt_from_scsiid_locked tgt:%s  devinfo:%s",
+			tgt_ctxt->tc_guid, uuid);
+		if (strcmp(tgt_ctxt->tc_guid, uuid) == 0) {
+			break;
+		}
+	}
+
+	if (tgt_ctxt && check_for_tc_state(tgt_ctxt, 1)) {
+		tgt_ctxt = NULL;
+		goto retry;
+	}
+
+	if (tgt_ctxt) {
+		get_tgt_ctxt(tgt_ctxt);
+	}
+	return tgt_ctxt;
 }
 
 target_context_t *

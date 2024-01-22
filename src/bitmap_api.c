@@ -1108,6 +1108,7 @@ inm_s32_t move_rawio_changes_to_bitmap(bitmap_api_t *bapi,
 			               
 	inm_s32_t status = 0;
 	inm_u32_t max_nr_lcw = 0;
+	inm_s32_t nr_changes_discarded = 0;
 
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
@@ -1177,8 +1178,13 @@ inm_s32_t move_rawio_changes_to_bitmap(bitmap_api_t *bapi,
 				}
 			}
 		} else {
-			info("discarding change ");
+			nr_changes_discarded++;
 		}
+	}
+
+	if (nr_changes_discarded) {
+		info("Number of changes discarded for volume %s = %d",
+			bapi->volume_name, nr_changes_discarded);
 	}
 	
 	if (bapi->bitmap_header.un.header.changes_lost) {
@@ -1582,7 +1588,7 @@ inm_s32_t bitmap_api_verify_header(bitmap_api_t *bapi,
 
 
 	if (!_rc) {
-		info("Invalid Header");
+		info("Invalid Header for volume %s", bapi->volume_name);
 		info("validition of bmap hdr");
 		info("endian  = %d", (bhdr.endian == BITMAP_FILE_ENDIAN_FLAG));
 		info("hdr sz  = %d", bhdr.header_size); 

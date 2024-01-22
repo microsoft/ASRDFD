@@ -61,6 +61,7 @@ struct _write_metadata_tag;
 #define IN_IOCTL_PATH                           0x0004
 #define IN_GET_DB_PATH                          0x0008
 #define IN_BMAP_READ_PATH                       0x0010
+#define IN_IOBARRIER_PATH                       0x0011
 
 /* Change node types */
 typedef enum 
@@ -231,7 +232,7 @@ inm_s32_t verify_change_node_file(change_node_t *cnode);
 
 void do_perf_changes(struct _target_context *tgt_ctxt, 
 				change_node_t *recent_cnode, int path);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 void do_perf_changes_all(struct _target_context *tgt_ctxt, int path);
 void move_chg_nodes_to_drainable_queue(void);
 #endif

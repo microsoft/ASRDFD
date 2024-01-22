@@ -987,7 +987,7 @@ do_start_mirroring(inm_devhandle_t *idhp, mirror_conf_info_t *mirror_infop)
 						}
 						hdc_dev->hdc_req_q_ptr = q_info;
 						INM_ATOMIC_INC(&q_info->vol_users);
-						init_tc_kobj(vol_entry2->mirror_dev,
+						init_tc_kobj(q_info, vol_entry2->mirror_dev,
 							         &hdc_dev->hdc_disk_kobj_ptr);
 						inm_list_add_tail(&hdc_dev->hdc_dev_list,
 							&hdcp->hdc_dev_list_head);
@@ -1249,7 +1249,7 @@ do_stop_filtering(target_context_t *tgt_ctxt)
 	}
 
 	volume_lock(tgt_ctxt);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	if(!inm_list_empty(&tgt_ctxt->tc_non_drainable_node_head)) {
 		tgt_ctxt->tc_flags &= ~VCF_IO_BARRIER_ON;
 		inm_list_splice_at_tail(&tgt_ctxt->tc_non_drainable_node_head,

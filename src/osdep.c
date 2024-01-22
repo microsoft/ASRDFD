@@ -72,7 +72,10 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+static int
+inm_sd_open(struct gendisk *disk, blk_mode_t mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 static int inm_sd_open(struct block_device *bdev, fmode_t mode);
 #else
 static int inm_sd_open(struct inode *inode, struct file *filp);
@@ -943,7 +946,10 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+static int
+inm_sd_open(struct gendisk *disk, blk_mode_t mode)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 static int
 inm_sd_open(struct block_device *bdev, fmode_t mode)
 #else
@@ -952,7 +958,9 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
 	 struct gendisk *disk = NULL;
+#endif
 	 struct scsi_device *sdp = NULL;
 
 	 if(is_AT_blocked()){
@@ -960,16 +968,20 @@ inm_sd_open(struct inode *inode, struct file *filp)
 		 goto out;
 	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
 #else
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
 		disk = inode->i_bdev->bd_disk;
+#endif
 #endif
 		/* For pseudo devices like emc powerpath may not populate
 		 * gendisk->driverfs_dev structure, so we can exclude such
@@ -1427,7 +1439,9 @@ print_AT_stat(target_context_t *tcp, char *page, inm_s32_t *len)
 struct block_device *
 inm_open_by_devnum(dev_t dev, unsigned mode)
 {
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+	return blkdev_get_by_dev(dev, mode, NULL, NULL);
+#elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
 	return blkdev_get_by_dev(dev, mode, NULL);
 #else
 	return open_by_devnum(dev, mode);
@@ -2912,7 +2926,7 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	INM_DOWN(&driver_ctx->dc_cp_mutex);
 
 	if (driver_ctx->dc_cp != INM_CP_NONE) {
-		err("Consistency Point already active");
+		dbg("Consistency Point already active");
 		ret = -EAGAIN;
 		msg = ecMsgCompareExchangeTagStateFailure;
 		goto unlock_cp_mutex;
@@ -2920,11 +2934,11 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 	dbg("creating io barrier\n");
 	INM_DOWN_WRITE(&(driver_ctx->tgt_list_sem));
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	volume_lock_all_close_cur_chg_node();
 #endif
 	INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 1);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	get_time_stamp_tag(&driver_ctx->dc_crash_tag_timestamps);
 	volume_unlock_all();
 #endif
@@ -3049,7 +3063,7 @@ remove_io_barrier:
 	dbg("removing io barrier\n");
 	INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 0);
 	INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	move_chg_nodes_to_drainable_queue();
 #endif
 	dbg("removed io barrier");
@@ -3132,7 +3146,7 @@ remove_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len)
 			dbg("Guid matched, removing barrier");
 			INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
 			INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 0);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 			move_chg_nodes_to_drainable_queue();
 #endif
 			driver_ctx->dc_cp &= ~INM_CP_CRASH_ACTIVE;
@@ -3219,11 +3233,11 @@ create_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len, int timeout_ms)
 				goto out_err;
 			}
 		}
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 		volume_lock_all_close_cur_chg_node();
 #endif
 		INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 1);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 		get_time_stamp_tag(&driver_ctx->dc_crash_tag_timestamps);
 		volume_unlock_all();
 #endif
@@ -3510,13 +3524,20 @@ log_console(const char *fmt, ...)
 void
 inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 {
+#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	snprintf(name, INM_BDEVNAME_SIZE, "%pg", bdev);
+#else
 	bdevname(bdev, name);
+#endif
 }
 
 inm_s32_t
 inm_blkdev_get(inm_bio_dev_t *bdev)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
+			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
 				FMODE_READ | FMODE_WRITE, NULL)) ? 1 : 0);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,38))

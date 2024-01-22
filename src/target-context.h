@@ -361,6 +361,9 @@ typedef struct _target_context {
 	inm_atomic_t    tc_nr_chain_bios_pending;
 	inm_atomic_t    tc_nr_completed_in_child_stack;
 	inm_atomic_t    tc_nr_completed_in_own_stack;
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
+	inm_atomic_t    tc_nr_write_zero_bios;
+#endif
 } target_context_t;
 
 #define volume_lock(ctx) 						\
@@ -485,6 +488,7 @@ void tgt_ctx_spec_deinit(target_context_t *);
 int check_for_tc_state(target_context_t *, int);
 void wake_up_tc_state(target_context_t *);
 target_context_t *get_tgt_ctxt_from_uuid_locked(char *);
+target_context_t *get_tgt_ctxt_from_device_name_locked(char *);
 target_context_t *get_tgt_ctxt_from_scsiid_locked(char *);
 target_context_t *get_tgt_ctxt_from_scsiid(char *);
 target_context_t *get_tgt_ctxt_from_uuid(char *);

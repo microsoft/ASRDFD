@@ -41,7 +41,9 @@ typedef struct bio		inm_buf_t;
 struct drv_open{
 	const struct block_device_operations *orig_dev_ops;
 	struct block_device_operations mod_dev_ops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+	int (*orig_drv_open)(struct gendisk *disk, blk_mode_t mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	int (*orig_drv_open)(struct block_device *bdev, fmode_t mode);
 #else
 	int (*orig_drv_open)(struct inode *inode, struct file *filp);

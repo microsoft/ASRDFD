@@ -36,6 +36,7 @@
 #include "filestream_raw.h"
 
 extern driver_context_t *driver_ctx;
+extern inm_u32_t lcwModeOn;
 
 static void
 fstream_raw_print_map(char *file, fstream_raw_hdl_t *hdl)
@@ -107,6 +108,7 @@ fstream_raw_revert_recursive_detection(void *filp)
 	int rflag = 0;
 
 	rflag = driver_ctx->dc_lcw_rflag;
+	lcwModeOn = 0;
 	
 	driver_ctx->dc_lcw_rflag = 0;
 	driver_ctx->dc_lcw_aops = NULL;
@@ -163,10 +165,11 @@ fstream_raw_prepare_for_recusive_detection(void *filp, fstream_raw_hdl_t *hdl)
 					INM_INODE_AOPS(INM_HDL_TO_INODE(filp)), 
 					INM_DUP_ADDR_SPACE_OPS);
 	driver_ctx->dc_lcw_rhdl = hdl;
+	lcwModeOn = 1;
 	driver_ctx->dc_lcw_rflag = rflag;
    
 out:
-   return error; 
+	return error; 
 }
 
 static void
@@ -193,12 +196,16 @@ fstream_raw_map_file_blocks(fstream_raw_hdl_t *hdl, inm_bio_dev_t *disk,
 		if (map->fb_disk) {
 			err("Mapping already mapped block");
 			hdl->frh_nblks = 0;
+			INM_SPIN_UNLOCK_IRQRESTORE(&(hdl->frh_slock), flag);
 			break;
 		}
 		
 		if (hdl->frh_nblks == (hdl->frh_alen >> hdl->frh_bshift)) {
-			err("Mapping more blocks then expected");
+			err("Mapping more blocks then expected hdl->frh_nblks=%u, "
+				"hdl->frh_alen=%u, hdl->frh_bshift=%u",
+				hdl->frh_nblks, hdl->frh_alen, hdl->frh_bshift);
 			hdl->frh_nblks = 0;
+			INM_SPIN_UNLOCK_IRQRESTORE(&(hdl->frh_slock), flag);
 			break;
 		}
 
@@ -363,6 +370,8 @@ fstream_raw_hdl_alloc(void *filp, inm_u64_t offset, inm_u32_t len,
 	hdl->frh_bsize = (INM_HDL_TO_INODE(filp))->i_sb->s_blocksize;
 	hdl->frh_bshift = (INM_HDL_TO_INODE(filp))->i_sb->s_blocksize_bits;
 	hdl->frh_nblks = 0;
+
+	err("fstream_raw_hdl_alloc frh_alen=%u", hdl->frh_alen);
 	
 	/* access the block map as 2D array */
 	hdl->frh_blocks = (fr_block_t **)((char *)hdl + 

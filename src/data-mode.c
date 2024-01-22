@@ -795,7 +795,7 @@ inm_split_change_in_data_mode(target_context_t *tgt_ctxt,
 	num_pages = 0;
 	total_num_pages = 0;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	if ((INM_ATOMIC_READ(&driver_ctx->is_iobarrier_on)) ) {
 		is_barrier_on = 1;
 		if(!(tgt_ctxt->tc_flags & VCF_IO_BARRIER_ON)) {
@@ -923,7 +923,7 @@ add_change_node_to_list:
    	/*
 	 * Append the split IO change nodes in to target head list of change nodes
 	 */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	if (is_barrier_on) {
 		inm_list_splice_at_tail(&split_chg_node_list,
 			&chg_node->vcptr->tc_non_drainable_node_head);

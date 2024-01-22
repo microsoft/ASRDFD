@@ -51,7 +51,7 @@ typedef host_dev_ctx_t *host_dev_ctxp;
 #define INM_BIOSZ		sizeof(dm_bio_info_t)
 #define INM_IOINFO_MPOOL_SZ	(INM_PAGESIZE/sizeof(dm_bio_info_t))
 /* filtering definitions */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 #ifndef queue_rq_fn
 typedef blk_status_t (queue_rq_fn)(struct blk_mq_hw_ctx *,
 		const struct blk_mq_queue_data *);
@@ -83,7 +83,8 @@ void copy_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 void reset_stable_pages_for_all_devs(void);
 void set_stable_pages_for_all_devs(void);
 req_queue_info_t* alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *tgt_ctxt);
-void init_tc_kobj(inm_block_device_t *bdev, struct kobject **hdc_disk_kobj_ptr);
+void init_tc_kobj(req_queue_info_t *q_info, inm_block_device_t *bdev,
+						struct kobject **hdc_disk_kobj_ptr);
 void inm_bufoff_to_fldisk(inm_buf_t *bp, target_context_t *tcp, inm_u64_t *abs_off);
 inm_mirror_bufinfo_t * inm_get_imb_cached(host_dev_ctx_t *);
 void inm_cleanup_mirror_bufinfo(host_dev_ctx_t *hdcp);

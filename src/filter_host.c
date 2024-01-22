@@ -50,6 +50,7 @@
 
 /* driver state */
 inm_s32_t inm_mod_state;
+inm_u32_t lcwModeOn;
 
 #ifdef IDEBUG_MIRROR_IO
 inm_s32_t inject_atio_err = 0;
@@ -205,13 +206,18 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 									lock_flag);
 		if(INM_ATOMIC_DEC_AND_TEST(&q_info->vol_users)){
 			remove_qinfo_from_dc(q_info);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 			(void)xchg(&q_info->q->mq_ops, q_info->orig_mq_ops);
 #else
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
+#else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 			if (q_info->rqi_flags & INM_STABLE_PAGES_FLAG_SET) {
 				CLEAR_STABLE_PAGES(q_info->q);
@@ -241,9 +247,13 @@ void restore_disk_rel_ptrs(void)
 		part_ktype_ptr->release = flt_part_release_fn;
 }
 
-void init_tc_kobj(inm_block_device_t *bdev, struct kobject **hdc_disk_kobj_ptr)
+void init_tc_kobj(req_queue_info_t *q_info, inm_block_device_t *bdev,
+					struct kobject **hdc_disk_kobj_ptr)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
+#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+	*hdc_disk_kobj_ptr = bdev_kobj(bdev);
+#else
 	if (!bdev_is_partition(bdev)) {
 		if(flt_disk_release_fn == NULL) {
 			INM_BUG_ON(bdev_kobj(bdev)->ktype->release == NULL);
@@ -261,6 +271,7 @@ void init_tc_kobj(inm_block_device_t *bdev, struct kobject **hdc_disk_kobj_ptr)
 		(void)xchg(&bdev_kobj(bdev)->ktype->release, &flt_part_obj_rel);
 		*hdc_disk_kobj_ptr = bdev_kobj(bdev);
 	}
+#endif
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30)
 	if(bdev == bdev->bd_contains) {
@@ -353,7 +364,11 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
+#else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
+#endif
 	if (q_info) {
 		INM_KFREE(new_q_info, sizeof(req_queue_info_t), 
 				  			INM_KERNEL_HEAP);
@@ -368,21 +383,33 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 #endif
 	q_info->q = q;
 	
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	if (q->disk->queue_kobj.ktype) {
+		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
+			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
+#else
 	if (q->kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 				q->kobj.ktype, sizeof(struct kobj_type));
+#endif
 	} else {
 		q_info->mod_kobj_type.release = NULL;
 		q_info->mod_kobj_type.sysfs_ops = NULL;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 		q_info->mod_kobj_type.default_attrs = NULL;
+#endif
 	}
 	INM_ATOMIC_SET(&q_info->ref_cnt, 0);
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
+#else
 	q_info->orig_kobj_type =  q->kobj.ktype;
+#endif
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	q_info->tc = ctx;
 	q_info->orig_mq_ops = q->mq_ops;
 	memcpy_s(&q_info->mod_mq_ops, sizeof(struct blk_mq_ops),
@@ -393,7 +420,11 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
+#else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	if (driver_ctx->tunable_params.stable_pages && !TEST_STABLE_PAGES(q)) {
 		q_info->rqi_flags |= INM_STABLE_PAGES_FLAG_SET;
@@ -1011,7 +1042,7 @@ free_bio_info:
 							INM_KERNEL_HEAP);
 		}
 		INM_DESTROY_SPIN_LOCK(&bio_info->bio_info_lock);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 		inm_free_bio_info(bio_info);
 #else
 		INM_MEMPOOL_FREE(bio_info, hdcp->hdc_bio_info_pool);
@@ -1247,7 +1278,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 	full_disk = 0;
 	chg_node = NULL;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	*bio_info = INM_KMALLOC(sizeof(dm_bio_info_t), 
 			 	GFP_ATOMIC | __GFP_NOWARN, INM_KERNEL_HEAP);
 	if (!(*bio_info)) {
@@ -1255,7 +1286,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 		alloced_from_pool = 1;
 	}
 #else
-	*bio_info = INM_MEMPOOL_ALLOC(hdcp->hdc_bio_info_pool, INM_KM_SLEEP);
+	*bio_info = INM_MEMPOOL_ALLOC(hdcp->hdc_bio_info_pool, GFP_NOIO);
 
 	/* Ideally we should not panic here. This bug check is here to 
 	 * understand the load on _bio_info_pool. This should be removed later 
@@ -1307,7 +1338,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 
 		while (remaining_length) {
 			alloced_from_pool = 0;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 			chg_node = INM_KMALLOC(sizeof(change_node_t), 
 			GFP_ATOMIC | __GFP_NOWARN, INM_KERNEL_HEAP);
 			if (!chg_node) {
@@ -1355,7 +1386,11 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 		dbg("CHAIN: %p", bio);
 		(*bio_info)->dm_bio_flags |= BINFO_FLAG_CHAIN;
 	}
-
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
+	if (bio_op(bio) == INM_REQ_WRITE_ZEROES) {
+		INM_ATOMIC_INC(&ctx->tc_nr_write_zero_bios);
+	}
+#endif
 out:
 	dbg("Write Entry Point: Offset %llu Length %d",
 		(inm_u64_t)(INM_BUF_SECTOR(bio) * 512), INM_BUF_COUNT(bio));
@@ -1373,7 +1408,7 @@ out_err:
 		chg_node->next.next = NULL;
 	inm_free_change_node(chg_node);
 	}
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	inm_free_bio_info(*bio_info);
 #else    
 	INM_MEMPOOL_FREE(*bio_info, hdcp->hdc_bio_info_pool);
@@ -1416,12 +1451,23 @@ is_our_io(struct bio *biop)
 	const inm_address_space_operations_t *a_opsp = NULL;
 	inma_ops_t *t_inma_opsp = NULL;
 	struct address_space *mapping = NULL;
+	unsigned long lock_flag;
 
 	INM_BUG_ON(!biop);
 
 #if !(defined(RHEL_MAJOR) && (RHEL_MAJOR == 5))
-	if (!biop->bi_vcnt || INM_IS_OFFLOAD_REQUEST_OP(biop))
+	if (!biop->bi_vcnt || INM_IS_OFFLOAD_REQUEST_OP(biop)) {
+#if (defined (RHEL8) || defined (RHEL7))
+		if (unlikely(lcwModeOn &&
+				strcmp(current->comm, "inmshutnotify") == 0)) {
+			fstream_raw_map_bio(biop);
+
+			/* If TrackRecursiveWrites is set, return FALSE */
+			return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;
+		}
+#endif
 		return FALSE;
+	}
 #endif
 
 	bvecp = bio_iovec_idx(biop, INM_BUF_ITER(biop));
@@ -1459,10 +1505,10 @@ is_our_io(struct bio *biop)
 	a_opsp = bvecp->bv_page->mapping->a_ops;
 #endif
 
-	INM_DOWN_READ(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(FALSE, &lock_flag);
 	t_inma_opsp = inm_get_inmaops_from_aops(a_opsp, 
 			 			INM_DUP_ADDR_SPACE_OPS);
-	INM_UP_READ(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(FALSE, &lock_flag);
 	if (t_inma_opsp) {
 #ifdef INM_RECUSIVE_ADSPC
 		INM_BUG_ON(t_inma_opsp->ia_mapping != 
@@ -1480,7 +1526,7 @@ is_our_io(struct bio *biop)
 	return FALSE;
 }
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 #define NR_MAX_ALLOCATIONS	1024
 #define NR_MAX_FREED		128
 void inm_free_bio_info(dm_bio_info_t *bio_info)
@@ -1817,7 +1863,11 @@ blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
+#else
 	q_info = get_qinfo_from_kobj(&q->kobj);
+#endif
 	if(q_info){
 		orig_queue_rq_fn = q_info->orig_mq_ops->queue_rq;
 		ctx = q_info->tc;
@@ -2253,7 +2303,11 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
+#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	qkobj = &disk->queue_kobj;
+#else
 	qkobj = &disk->queue->kobj;
+#endif
 	dbg("%s: queue = %p, kobj = %p, qkobj = %p", disk->disk_name, 
 			 			disk->queue, kobj, qkobj);
 	
@@ -2328,56 +2382,6 @@ static inm_s32_t completion_check_endio(struct bio *bio, inm_u32_t done,
 #endif
 }
 
-void check_completion_context(target_context_t *ctx, inm_block_device_t *bdev)
-{
-	completion_chk_req_t req;    
-	struct bio *bio = NULL;
-  
-	req.ctx = ctx;
-	INM_INIT_COMPLETION(&req.comp); 
-
-	bio = bio_alloc(INM_KM_SLEEP, 1);
-	if(bio) {
-#if ((LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0) && \
-	LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)) || \
-	defined SLES12SP4 || defined SLES12SP5 || defined SLES15) && \
-	(!defined SLES15SP4)
-		bio->bi_disk = bdev->bd_disk;
-#else
-		bio->bi_bdev = bdev;
-#endif
-	
-		bio->bi_io_vec[0].bv_page = INM_ALLOC_PAGE(INM_KM_SLEEP);
-		if(!bio->bi_io_vec[0].bv_page) 
-			goto error_out;
-		bio->bi_io_vec[0].bv_len = PAGE_SIZE;
-		bio->bi_io_vec[0].bv_offset = 0;
-		bio->bi_vcnt = 1;
-		INM_BUF_ITER(bio) = INM_BVEC_ITER_INIT();
-		INM_BUF_COUNT(bio) = PAGE_SIZE;
-		INM_BUF_SECTOR(bio) = 0;
-		bio->bi_end_io = completion_check_endio;
-		bio->bi_private = &req;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0) || defined SLES12SP3
-		bio->bi_opf = REQ_OP_READ;
-		submit_bio(bio);
-#else
-		submit_bio(READ, bio);
-#endif
-	
-		INM_WAIT_FOR_COMPLETION(&req.comp);
-	} 
-
-	return;
-	
-error_out:
-	if(bio) {
-		bio_put(bio);
-		bio = NULL;
-	}
-}
-
 target_context_t *
 flt_gendisk_to_tgt_ctxt(struct gendisk *disk)
 {
@@ -2408,7 +2412,7 @@ flt_revalidate_disk(struct gendisk *disk)
 	int (*org_revalidate_disk) (struct gendisk *) = NULL;
 	int error = 0;
 
-	err("Revalidating disk");
+	dbg("Revalidating disk");
 
 	tgt_ctx = flt_gendisk_to_tgt_ctxt(disk);
 	if (!tgt_ctx) {
@@ -2635,7 +2639,7 @@ retry:
 			if (hdc_dev) {
 				hdc_dev->hdc_req_q_ptr = q_info;
 				INM_ATOMIC_INC(&q_info->vol_users);
-				init_tc_kobj(bdev, 
+				init_tc_kobj(q_info, bdev, 
 						&hdc_dev->hdc_disk_kobj_ptr);
 			}
 			else
@@ -2672,7 +2676,7 @@ retry:
 					ret = -EINVAL;
 					break;
 				}
-				init_tc_kobj(vol_entry->mirror_dev, 
+				init_tc_kobj(q_info, vol_entry->mirror_dev, 
 						&hdc_dev->hdc_disk_kobj_ptr);
 			}
 			break;
@@ -2925,6 +2929,10 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 
 	case IOCTL_INMAGE_STOP_FILTERING_DEVICE:
 		error = process_stop_filtering_ioctl(filp, (void __user *)arg);
+		break;
+
+	case IOCTL_INMAGE_REMOVE_FILTER_DEVICE:
+		error = process_remove_filter_device_ioctl(filp, (void __user *)arg);
 		break;
 
 	case IOCTL_INMAGE_START_FILTERING_DEVICE_V2:
@@ -3635,13 +3643,13 @@ inm_prepare_atbuf(inm_mirror_atbuf *atbuf_wrap, inm_buf_t *bp,
 	atbuf_wrap->imb_atbuf_buf.bi_destructor = NULL;
 #endif
 
-#if ((LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0) && 			     \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)) ||	     \
-		defined SLES12SP4 || defined SLES12SP5 || defined SLES15) && \
-		(!defined SLES15SP4)
-	atbuf_wrap->imb_atbuf_buf.bi_disk = vol_entry->mirror_dev->bd_disk;
+#if ((LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0) &&         \
+        LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)) ||    \
+        defined SLES12SP4 || defined SLES12SP5 ||           \
+        (defined SLES15 && PATCH_LEVEL <= 3))
+    atbuf_wrap->imb_atbuf_buf.bi_disk = vol_entry->mirror_dev->bd_disk;
 #else
-	atbuf_wrap->imb_atbuf_buf.bi_bdev = vol_entry->mirror_dev;
+    atbuf_wrap->imb_atbuf_buf.bi_bdev = vol_entry->mirror_dev;
 #endif
 	atbuf_wrap->imb_atbuf_buf.bi_end_io = inm_at_mirror_iodone;
 	atbuf_wrap->imb_atbuf_buf.bi_next = NULL;

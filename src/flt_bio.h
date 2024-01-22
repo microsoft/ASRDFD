@@ -33,10 +33,10 @@ inm_s32_t flt_end_io_fn(struct bio *bio, inm_u32_t done, inm_s32_t error);
 typedef struct block_device inm_bio_dev_t;
 
 
-#if ((LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0) && \
-	LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)) || \
-	defined SLES12SP4 || defined SLES12SP5 || \
-	defined SLES15) && (!defined SLES15SP4)
+#if ((LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0) &&         \
+        LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)) ||    \
+        defined SLES12SP4 || defined SLES12SP5 ||           \
+        (defined SLES15 && PATCH_LEVEL <= 3))
 #define INM_BUF_DISK(bio)   ((bio)->bi_disk)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
 #define INM_BUF_BDEV(bio)    ((bio)->bi_disk->part0)
@@ -180,9 +180,14 @@ typedef unsigned short inm_bvec_iter_t;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)) || defined SLES12SP3
 
 #define INM_REQ_WRITE           REQ_OP_WRITE
+#if (defined(RHEL9) && !defined(RHEL9_0) && !defined(OL9UEK7)) || defined(SLES15SP5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+/* Defining it as 100000000 to not match with any req_op */
+#define INM_REQ_WRITE_SAME      100000000
+#else
 #define INM_REQ_WRITE_SAME      REQ_OP_WRITE_SAME
+#endif
 #define INM_REQ_DISCARD         REQ_OP_DISCARD
-#ifdef REQ_OP_WRITE_ZEROES
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
 #define INM_REQ_WRITE_ZEROES    REQ_OP_WRITE_ZEROES
 #else
 #define INM_REQ_WRITE_ZEROES    0
@@ -199,7 +204,7 @@ INM_IS_OFFLOAD_REQUEST_OP(struct bio *bio)
 	switch (bio_op(bio)) {
 	case INM_REQ_DISCARD:
 	case INM_REQ_WRITE_SAME:
-#ifdef REQ_OP_WRITE_ZEROES
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
 	case INM_REQ_WRITE_ZEROES:
 #endif
 		return 1;
@@ -285,7 +290,7 @@ INM_IS_SUPPORTED_REQUEST_OP(struct bio *bio)
  * For unsupported kernels, break build so we are forced to verify 
  * we are logging the right data.
  */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,6,0))
 #define INM_BIO_RW_FLAGS(bio)   (*bio = 0)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)) || defined SLES12SP3
 #define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) | bio->bi_flags) 

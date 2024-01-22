@@ -98,11 +98,16 @@ endif
 ifeq ($(findstring redhat, $(VENDOR)), redhat)
 	
 	IS_CENTOS:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH; cat /etc/redhat-release | grep -i '^centos' | cut -d" " -f 1 | tr A-Z a-z) 
+	IS_ALMA:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH; cat /etc/redhat-release | grep -i '^alma' | cut -d" " -f 1 | tr A-Z a-z)
 	
 	ifeq ($(findstring centos, $(IS_CENTOS)), centos)
 	
 		VER_STR=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
 			cat /etc/redhat-release | sed 's/Server //' | cut -d" " -f 4)
+	else ifeq ($(findstring alma, $(IS_ALMA)), alma)
+	
+		VER_STR=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
+			cat /etc/redhat-release | sed 's/Server //' | cut -d" " -f 3)
 	else
 	
 		VER_STR=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
@@ -151,11 +156,29 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 		endif
 	endif
 
+	ifeq ($(findstring 5.14.0-70.13.1.el9_0.x86_64, $(KDIR)), 5.14.0-70.13.1.el9_0.x86_64)
+		EXTRA_CFLAGS += -DRHEL9_0
+	endif
+
+	ifeq ($(findstring 5.14.0-284.11.1.el9_2.x86_64, $(KDIR)), 5.14.0-284.11.1.el9_2.x86_64)
+		EXTRA_CFLAGS += -DRHEL9_2
+	endif
+
+	ifeq ($(findstring 5.14.0-362.8.1.el9_3.x86_64, $(KDIR)), 5.14.0-362.8.1.el9_3.x86_64)
+		EXTRA_CFLAGS += -DRHEL9_3
+	endif
+
 	ifeq ($(findstring uek, $(KDIR)), uek)
 		EXTRA_CFLAGS += -DUEK
 	endif
 	ifeq ($(findstring 2.6.32-100.28.5.el6.x86_64, $(KDIR)), 2.6.32-100.28.5.el6.x86_64)
 		EXTRA_CFLAGS += -DUEK
+	endif
+	ifeq ($(findstring 4.14.35-1902.0.18.el7uek.x86_64, $(KDIR)), 4.14.35-1902.0.18.el7uek.x86_64)
+		EXTRA_CFLAGS += -DOL7UEK5
+	endif
+	ifeq ($(findstring 5.15.0-0.30.19.el9uek.x86_64, $(KDIR)), 5.15.0-0.30.19.el9uek.x86_64)
+		EXTRA_CFLAGS += -DOL9UEK7
 	endif
 endif
 
@@ -283,6 +306,7 @@ involflt-objs := ${INVOLFLT_OBJS}
 all:
 	@echo "BLD_DATE: ${BLD_DATE}"
 	@echo "BLD_TIME: ${BLD_TIME}"
+	@echo "EXTRA_CFLAGS: ${EXTRA_CFLAGS}"
 	$(MAKE) -C ${KDIR} M=${BLD_DIR} modules
 
 #cleaning all the build files

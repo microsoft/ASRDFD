@@ -451,7 +451,7 @@ inm_s32_t add_tag_in_non_stream_mode(tag_volinfo_t *tag_volinfop,
 		goto unlock_exit;
 	}
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	if (INM_ATOMIC_READ(&driver_ctx->is_iobarrier_on)) {
 		memcpy_s(&chg_node->changes.start_ts, 
 			sizeof(TIME_STAMP_TAG_V2),

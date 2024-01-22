@@ -32,6 +32,7 @@ inm_s32_t process_start_notify_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_shutdown_notify_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_start_filtering_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_stop_filtering_ioctl(inm_devhandle_t *, void __INM_USER *);
+inm_s32_t process_remove_filter_device_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_start_mirroring_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_stop_mirroring_ioctl(inm_devhandle_t *, void __INM_USER *);
 inm_s32_t process_volume_unstacking_ioctl(inm_devhandle_t *, void __INM_USER *);

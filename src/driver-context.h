@@ -299,7 +299,11 @@ typedef struct _driver_context {
 	struct drv_ctx_bmap_info    dc_bmap_info;
 
 	/* lock to protect a_ops list */
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+    inm_spinlock_t dc_inmaops_lock;		/* lock to protect a_ops list */
+#else 	
 	inm_rwsem_t dc_inmaops_sem;
+#endif	
 	/* inma_ops list for handling recursive writes */
 	/* list of duplicated address space operations */
 	struct inm_list_head dc_inma_ops_list;
@@ -371,7 +375,7 @@ typedef struct _driver_context {
 	inm_u16_t       dc_wokeup_tag_drain_notify_thread;
 	char            *dc_tag_drain_notify_guid;
 	inm_u32_t       dc_tag_commit_notify_flag;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	inm_completion_t dc_alloc_thread_started;
 	inm_wait_queue_head_t dc_alloc_thread_waitq;
 	inm_completion_t dc_alloc_thread_exit;
@@ -391,6 +395,9 @@ typedef struct _driver_context {
 	TIME_STAMP_TAG_V2 dc_crash_tag_timestamps;
 #endif
 } driver_context_t; 
+
+void lock_inmaops(bool write, unsigned long* lock_flag);
+void unlock_inmaops(bool write, unsigned long* lock_flag);
 
 
 #define INM_CP_NONE                 0

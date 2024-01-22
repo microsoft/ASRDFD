@@ -56,11 +56,15 @@
 #define SLES15SP3
 #elif (PATCH_LEVEL == 4)
 #define SLES15SP4
+#elif (PATCH_LEVEL == 5)
+#define SLES15SP5
 #endif
 #endif
 
-/* RHEL 7 */
-#if (defined redhat && DISTRO_VER == 8)
+/* RHEL */
+#if (defined redhat && DISTRO_VER == 9)
+#define RHEL9
+#elif (defined redhat && DISTRO_VER == 8)
 #define RHEL8
 #elif (defined redhat && DISTRO_VER == 7)
 #define RHEL7

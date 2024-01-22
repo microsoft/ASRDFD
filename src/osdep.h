@@ -128,7 +128,7 @@ struct _mirror_vol_entry;
 /* filtering specific section */
 typedef struct _dm_bio_info
 {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	struct inm_list_head entry;
 #endif
 	sector_t bi_sector;
@@ -176,7 +176,7 @@ typedef struct _req_q_info
 	struct kobj_type *orig_kobj_type;
 	struct request_queue *q;
 	int rqi_flags;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	struct blk_mq_ops *orig_mq_ops;
 	struct blk_mq_ops mod_mq_ops;
 	void *tc;
@@ -225,10 +225,14 @@ inm_s32_t is_rootfs_ro(void);
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
 inm_block_device_t *open_by_dev_path(char *, int);
 inm_block_device_t *open_by_dev_path_v2(char *, int);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+#define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
+#else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
 #define close_bdev(bdev, mode)  blkdev_put(bdev, mode);
 #else 
 #define close_bdev(bdev, mode)  blkdev_put(bdev);
+#endif
 #endif
 inm_s32_t flt_release(struct inode *inode, struct file *filp);
 inm_s32_t iobuffer_sync_read_physical(struct _iobuffer_tag *iob, inm_s32_t force);
@@ -257,6 +261,7 @@ inm_s32_t inm_get_scsi_id(char *path);
 #define IOCTL_INMAGE_PROCESS_START_NOTIFY     	_IOW(FLT_IOCTL, START_NOTIFY_CMD, PROCESS_START_NOTIFY_INPUT) 
 #define IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY     _IOW(FLT_IOCTL, SHUTDOWN_NOTIFY_CMD, SHUTDOWN_NOTIFY_INPUT)
 #define IOCTL_INMAGE_STOP_FILTERING_DEVICE      _IOW(FLT_IOCTL, STOP_FILTER_CMD, VOLUME_GUID)
+#define IOCTL_INMAGE_REMOVE_FILTER_DEVICE      _IOW(FLT_IOCTL, REMOVE_FILTER_DEVICE_CMD, VOLUME_GUID)
 #define IOCTL_INMAGE_START_FILTERING_DEVICE       _IOW(FLT_IOCTL, START_FILTER_CMD, VOLUME_GUID)
 #define IOCTL_INMAGE_START_FILTERING_DEVICE_V2       _IOW(FLT_IOCTL, START_FILTER_CMD_V2, inm_dev_info_compat_t)
 #define IOCTL_INMAGE_COMMIT_DIRTY_BLOCKS_TRANS  _IOW(FLT_IOCTL, COMMIT_DB_CMD, COMMIT_TRANSACTION)
@@ -467,8 +472,15 @@ typedef struct completion		inm_completion_t;
 #define INM_INIT_COMPLETION(event)                                      \
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
-#define INM_COMPLETE_AND_EXIT(event, val)                               \
+
+#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#define INM_COMPLETE_AND_EXIT(event, val)				\
+		kthread_complete_and_exit(event, val)
+#else
+#define INM_COMPLETE_AND_EXIT(event, val)				\
 		complete_and_exit(event, val)
+#endif
+
 #define INM_WAIT_FOR_COMPLETION(event)                                  \
 		wait_for_completion(event)
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,9) || 			\
@@ -657,7 +669,7 @@ typedef struct _page_wrapper {
 	struct inm_list_head entry;
 	unsigned long *cur_pg;
 	inm_u32_t nr_chgs;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	inm_u32_t flags;
 #endif
 } inm_page_t;
@@ -877,6 +889,12 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #else
 #define INM_VIRT_ADDR_VALID(vaddr)		(1)
 #endif
+#endif
+
+#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+typedef struct {
+    /* empty dummy */
+} mm_segment_t;
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)

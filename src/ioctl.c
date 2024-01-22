@@ -769,6 +769,85 @@ inm_s32_t process_stop_filtering_ioctl(inm_devhandle_t *idhp,
 	return error;
 }
 
+inm_s32_t remove_filter_device(char *uuid)
+{
+	target_context_t *tgt_ctxt = NULL;
+
+#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+	info("Removing filter device : %s", uuid);
+	INM_DOWN_WRITE(&driver_ctx->tgt_list_sem);
+	tgt_ctxt = get_tgt_ctxt_from_device_name_locked(uuid);
+	if(!tgt_ctxt) {
+		INM_UP_WRITE(&driver_ctx->tgt_list_sem);
+		err("Failed to get target context from device name : %s", uuid);
+		return -ENODEV;
+	}
+
+	volume_lock(tgt_ctxt);
+	tgt_ctxt->tc_flags |= VCF_VOLUME_DELETING;
+	tgt_ctxt->tc_filtering_disable_required = 0;
+	close_disk_cx_session(tgt_ctxt, CX_CLOSE_DISK_REMOVAL);
+	set_tag_drain_notify_status(tgt_ctxt, TAG_STATUS_DROPPED, 
+						DEVICE_STATUS_REMOVED);
+	volume_unlock(tgt_ctxt);
+	if (driver_ctx->dc_root_disk == tgt_ctxt)
+		driver_ctx->dc_root_disk = NULL;
+
+	INM_UP_WRITE(&driver_ctx->tgt_list_sem);
+
+	if (tgt_ctxt->tc_bp->volume_bitmap) {
+		wait_for_all_writes_to_complete(tgt_ctxt->tc_bp->volume_bitmap);
+		flush_and_close_bitmap_file(tgt_ctxt);
+	}
+
+	tgt_ctx_force_soft_remove(tgt_ctxt);
+	put_tgt_ctxt(tgt_ctxt);
+
+#else
+	info("Remove filter device is no-op.");
+#endif
+
+	return 0;
+}
+
+inm_s32_t process_remove_filter_device_ioctl(inm_devhandle_t *idhp, 
+						void __INM_USER *arg)
+{
+	inm_s32_t error = 0;
+	VOLUME_GUID *guid = NULL;
+
+	dbg("entered");
+
+	if(!INM_ACCESS_OK(VERIFY_READ, (void __INM_USER *)arg, 
+							sizeof(VOLUME_GUID))) {
+		err("Read access violation for VOLUME_GUID");
+		return -EFAULT;
+	}
+
+	guid = (VOLUME_GUID *)INM_KMALLOC(sizeof(VOLUME_GUID), INM_KM_SLEEP, 
+							INM_KERNEL_HEAP);
+	if(!guid) {
+		err("INM_KMALLOC failed to allocate memory for VOLUME_GUID");
+		return -ENOMEM;
+	}
+
+	if(INM_COPYIN(guid, arg, sizeof(VOLUME_GUID))) {
+		err("INM_COPYIN failed");
+		INM_KFREE(guid, sizeof(VOLUME_GUID), INM_KERNEL_HEAP);
+		return -EFAULT;
+	}
+
+	guid->volume_guid[GUID_SIZE_IN_CHARS-1] = '\0';
+
+	error = remove_filter_device((char *)&guid->volume_guid[0]);
+
+	INM_KFREE(guid, sizeof(VOLUME_GUID), INM_KERNEL_HEAP);
+
+	dbg("leaving");
+
+	return error;
+}
+
 inm_s32_t process_stop_mirroring_ioctl(inm_devhandle_t *idhp, 
 						void __INM_USER *arg)
 {
@@ -985,7 +1064,7 @@ inm_s32_t process_get_db_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 		return -EFAULT;
 	}
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	inm_alloc_pools();
 #else
 	balance_page_pool(INM_KM_SLEEP, 0);
@@ -1452,7 +1531,7 @@ inm_s32_t process_sys_shutdown_notify_ioctl(inm_devhandle_t *idhp,
 		return -EFAULT;
 
 	err("system_shutdown is informed to inm driver");
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	move_chg_nodes_to_drainable_queue();
 #endif
 
@@ -2243,7 +2322,7 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 		"Reserved change-node pages  : %u Pages\n",
 		(driver_ctx->dc_res_cnode_pgs));
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Reserved BIOInfo/failed     : %d/%d\n",
 		INM_ATOMIC_READ(&driver_ctx->dc_nr_bioinfo_alloced),
@@ -2598,7 +2677,7 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 		dbg("vol_stat allocation volume_stats failed\n");
 		ret = INM_ENOMEM;
 		goto out;
-	}    
+	}
 	if (INM_COPYIN(vol_stat, arg, sizeof(VOLUME_STATS))){
 		err("copyin failed");
 		ret = -EFAULT;
@@ -2621,16 +2700,16 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 		dbg("page allocation volume_stats failed");
 		ret = -ENOMEM;
 		goto out;
-	}    
+	}
 	INM_MEM_ZERO(page, sizeof(*page));
 
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"\nPersistent Name                     : ");
 	len += snprintf(page+len, (INM_PAGESZ - len), "%s", ctxt->tc_pname);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"\nVolume State                        : ");
-	
+
 	if (ctxt->tc_dev_type == FILTER_DEV_MIRROR_SETUP){
 		if (is_target_mirror_paused(ctxt)){
 			strp = "Mirroring Paused";
@@ -2642,7 +2721,7 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			strp = "Filtering Disabled ";
 		} else {
 			strp = "Filtering Enabled ";
-		}    
+		}
 	}
 	len += snprintf(page+len, (INM_PAGESZ - len), strp);
 
@@ -2658,11 +2737,11 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			", Resync Required ");
 	}
 	len += snprintf(page+len, (INM_PAGESZ - len), "\n");
-	
+
 	if (ctxt->tc_dev_type != FILTER_DEV_MIRROR_SETUP){
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Filtering Mode/Write Order State    : ");
-	
+
 		if (ctxt->tc_cur_mode == FLT_MODE_DATA) {
 			strp = "Data";
 		} else if (ctxt->tc_cur_mode == FLT_MODE_METADATA) {
@@ -2684,28 +2763,28 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 
 		len += snprintf(page+len, (INM_PAGESZ - len), "%s/%s", 
 								strp, strp_2);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			 "Time spent in Curr mode/state (sec) : %llu/%llu\n",
 			(INM_GET_CURR_TIME_IN_SEC - 
 				ctxt->tc_stats.st_mode_switch_time),
 			(INM_GET_CURR_TIME_IN_SEC -
 				ctxt->tc_stats.st_wostate_switch_time));
-		
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 				"Writes (bytes)                      : %lld\n", 
 				ctxt->tc_bytes_tracked); 
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 				"Pending Changes/bytes               : %lld/%lld\n", 
 				ctxt->tc_pending_changes,
 				ctxt->tc_bytes_pending_changes); 
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
   			"Pending Changes/bytes in metadata   : %lld/%lld\n", 
 			ctxt->tc_pending_md_changes, 
 			ctxt->tc_bytes_pending_md_changes);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Commited Changes/bytes              : %lld/%lld\n", 
 			ctxt->tc_commited_changes, 
@@ -2721,12 +2800,18 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			INM_ATOMIC_READ(&ctxt->tc_nr_completed_in_child_stack),
 			INM_ATOMIC_READ(&ctxt->tc_nr_completed_in_own_stack));
 
-		if (ctxt->tc_dev_type == FILTER_DEV_FABRIC_LUN) {
+#if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
+		len += snprintf(page+len, (INM_PAGESZ - len),
+			"Number of WRITE_ZERO BIOs Received  : %d\n",
+			INM_ATOMIC_READ(&ctxt->tc_nr_write_zero_bios));
+#endif
+
+        if (ctxt->tc_dev_type == FILTER_DEV_FABRIC_LUN) {
 			len += snprintf(page+len, (INM_PAGESZ - len),
 				"Total Write IOs received            : %llu (%llu bytes)\n", 
 				ctxt->tc_stats.tc_write_io_rcvd_bytes, 
 				ctxt->tc_stats.tc_write_io_rcvd); 
-		
+
 			len += snprintf(page+len, (INM_PAGESZ - len),
 				"Total Write IO Cancels received     : %d (%llu bytes)\n", 
 				INM_ATOMIC_READ(&(ctxt->tc_stats.tc_write_cancel)),
@@ -2737,23 +2822,23 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			"Data Files Created/Pending          : %d/%d\n",
 			INM_ATOMIC_READ(&ctxt->tc_stats.num_dfm_files),
 			INM_ATOMIC_READ(&ctxt->tc_stats.num_dfm_files_pending));
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Data File Disk Space (Alloc/Used)   : %lld/%lld\n",
 			ctxt->tc_data_to_disk_limit, 
 			ctxt->tc_stats.dfm_bytes_to_disk);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Bitmap Changes Queued/bytes         : %llu/%llu\n",
 			bitmap->num_changes_queued_for_writing,
 			bitmap->num_byte_changes_queued_for_writing);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Bitmap Changes Read/bytes           : %llu/%llu (%llu times)\n",
 			bitmap->num_changes_read_from_bitmap,
 			bitmap->num_byte_changes_read_from_bitmap,
 			bitmap->num_of_times_bitmap_read);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Bitmap Changes Written/bytes        : %llu/%llu (%llu times)\n",
 			bitmap->num_changes_written_to_bitmap,
@@ -2819,15 +2904,15 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			ctxt->tc_pending_wostate_data_changes,
 			ctxt->tc_pending_wostate_md_changes,
 			ctxt->tc_pending_wostate_bm_changes);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Pages Allocated                     : %d\n",
 			ctxt->tc_stats.num_pages_allocated);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"No. of Pages Reserved               : %u\n",
 			ctxt->tc_reserved_pages);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"No. of change-node pages            : %lld\n",
 			ctxt->tc_cnode_pgs);
@@ -2836,15 +2921,15 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			"Threshold for DF in pages           : %u \n", 
 			(driver_ctx->tunable_params.volume_percent_thres_for_filewrite*
 			ctxt->tc_reserved_pages)/100);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Pages in DF Queue                   : %d\n",
 			ctxt->tc_stats.num_pgs_in_dfm_queue);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Changes Lost                        : %s\n",
 			(ctxt->tc_resync_required) ? "Yes" : "No");
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"DB Notify Threshold                 : %d\n",
 			ctxt->tc_db_notify_thres);
@@ -2858,18 +2943,18 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Tags Dropped                        : %d\n",
 		INM_ATOMIC_READ(&ctxt->tc_stats.num_tags_dropped));
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Metadata transition due to delay Data Pool allocation : %d\n",
 		INM_ATOMIC_READ(&ctxt->tc_stats.metadata_trans_due_to_delay_alloc));
-	
+
 	if (ctxt->tc_dev_type != FILTER_DEV_MIRROR_SETUP){
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Total Mode Transistions             : "
 			"Data = %ld | Meta = %ld\n",
 			ctxt->tc_stats.num_change_to_flt_mode[FLT_MODE_DATA],
 			ctxt->tc_stats.num_change_to_flt_mode[FLT_MODE_METADATA]);
-	
+
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			 "Total Time spent in each Mode(sec)  : "
 				"Data = %ld | Meta = %ld\n",
@@ -2899,12 +2984,12 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	}
 
 	len += snprintf(page+len, (INM_PAGESZ - len), "IO Pattern\n");
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"OP 512 1k 2k 4k 8k 16k 32k 64k 128k 256k 512k 1M 2M 4M 8M 8M+\n");
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len), "W ");
-	
+
 	for (idx = 0; idx < MAX_NR_IO_BUCKETS; idx++) {
 		 len += snprintf(page+len, (INM_PAGESZ - len), "%d ", 
 			INM_ATOMIC_READ(&ctxt->tc_stats.io_pat_writes[idx]));
@@ -2913,7 +2998,7 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	len += snprintf(page+len, (INM_PAGESZ - len), "\n");
 	print_AT_stat_common(ctxt, page, &len);
 	len += snprintf(page+len, (INM_PAGESZ - len), "\n");
-	
+
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_vm_cx_session_lock,
 					  driver_ctx->dc_vm_cx_session_lock_flag);
 	disk_cx_sess = &ctxt->tc_disk_cx_session;
@@ -2922,7 +3007,7 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			"CX State                            : Session Not Started\n");
 
 		goto unlock_session_lock;
-	}   
+	}
 
 	if (disk_cx_sess->dcs_flags & DCS_CX_SESSION_ENDED)
 		strp = "Session Ended";
@@ -2977,40 +3062,40 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 unlock_session_lock:
 	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_vm_cx_session_lock,
 				  driver_ctx->dc_vm_cx_session_lock_flag);
-		
+
 	len += snprintf(page+len, (INM_PAGESZ - len), "History \n");
 
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Start filtering issued at (sec)     : %llu\n",
 		ctxt->tc_hist.ths_start_flt_ts);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Clear stats issued at (sec)         : %llu\n",
 		ctxt->tc_hist.ths_clrstats_ts);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Clear diffs issued                  : %u\n",
 		ctxt->tc_hist.ths_nr_clrdiffs);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Last Clear diffs issued at (sec)    : %llu\n",
 		ctxt->tc_hist.ths_clrdiff_ts);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Times Resync marked                 : %u\n",
 		ctxt->tc_hist.ths_nr_osyncs);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Last Resync marked at(sec)          : %llu\n",
 		ctxt->tc_hist.ths_osync_ts);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Last Resync Error                   : %u\n",
 		ctxt->tc_hist.ths_osync_err);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len), "\n");
-	
-	
+
+
 	if (INM_COPYOUT(vol_stat->bufp, page,
 		MIN(vol_stat->buf_len, INM_PAGESZ))) {
 		err("copyout failed");
@@ -3018,7 +3103,7 @@ unlock_session_lock:
 		goto out;
 	}
 
-out:    
+out:
 	if(ctxt)
 		put_tgt_ctxt(ctxt);
 	if (page){

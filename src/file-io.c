@@ -38,6 +38,9 @@
 #include <linux/dcache.h>
 #include <linux/fs_struct.h>
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+#include <linux/filelock.h>
+#endif
 
 extern driver_context_t *driver_ctx;
 
@@ -516,9 +519,15 @@ inm_mkdir(char *dir_name, inm_s32_t mode)
 				mode &= ~current->fs->umask;
 			dbg("Coming in inm_mkdir befor vfs_mkdir\n");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+			err = vfs_mkdir(mnt_idmap(nameidata.path.mnt),
+						nameidata.path.dentry->d_inode,
+						dir, mode);
+#else
 			err = vfs_mkdir(mnt_user_ns(nameidata.path.mnt),
 						nameidata.path.dentry->d_inode,
 						dir, mode);
+#endif
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30)
 			err = vfs_mkdir(nameidata.path.dentry->d_inode,
@@ -624,9 +633,15 @@ __inm_unlink(const char * pathname, char *parent_path)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+				error = vfs_unlink(mnt_idmap(path.mnt),
+							parent_inode,
+							dentry, &deleg);
+#else
 				error = vfs_unlink(mnt_user_ns(path.mnt),
 							parent_inode,
 							dentry, &deleg);
+#endif
 #else
 				error = vfs_unlink(parent_inode, dentry,
 							&deleg);
@@ -1107,6 +1122,7 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 	const inm_address_space_operations_t *mapping= NULL;
 	inma_ops_t *t_inma_opsp = NULL;
 	inm_s32_t ret = -1;
+	unsigned long lock_flag = 0;
 
 	if (!inodep || !inodep->i_mapping) {
 		ret = -EINVAL;
@@ -1118,7 +1134,7 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 	INM_BUG_ON(!mapping);
 
 	/* new node is required */
-	INM_DOWN_WRITE(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(TRUE, &lock_flag);
 
 	t_inma_opsp = inm_get_inmaops_from_aops(mapping,
 						INM_ORG_ADDR_SPACE_OPS);
@@ -1143,7 +1159,7 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 	ret = 0;
 
 exit_locked:
-	INM_UP_WRITE(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(TRUE, &lock_flag);
 
 exit:
 	return ret;
@@ -1153,12 +1169,13 @@ void
 inm_restore_org_addr_space_ops(struct inode *inodep)
 {
 	inma_ops_t *t_inma_opsp = NULL;
+	unsigned long lock_flag;
 
-	INM_DOWN_WRITE(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(TRUE, &lock_flag);
 	t_inma_opsp = inm_get_inmaops_from_aops(inodep->i_mapping, 
 			                            INM_ORG_ADDR_SPACE_OPS);
 	inm_list_del(&t_inma_opsp->ia_list);
-	INM_UP_WRITE(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(TRUE, &lock_flag);
 
 	dbg("Delete recursive object: Lookup = %p, mapping = %p", 
 	t_inma_opsp, t_inma_opsp->ia_mapping);   
@@ -1254,6 +1271,7 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 	const inm_address_space_operations_t *a_opsp = NULL;
 	inma_ops_t *t_inma_opsp = NULL;
 	inm_s32_t ret = -1;
+	unsigned long lock_flag;
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_META))){
 		info("entered");
@@ -1267,27 +1285,27 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 	a_opsp = (inm_address_space_operations_t *)inodep->i_mapping->a_ops;
 	INM_BUG_ON(!a_opsp);
 
-	INM_DOWN_READ(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(FALSE, &lock_flag);
 	t_inma_opsp = inm_get_inmaops_from_aops(a_opsp,
 						INM_ORG_ADDR_SPACE_OPS);
-	INM_UP_READ(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(FALSE, &lock_flag);
 
 	if (t_inma_opsp) {
 		goto xchange;
 	}
 
 	/* new node is required */
-	INM_DOWN_WRITE(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(TRUE, &lock_flag);
 	t_inma_opsp = inm_get_inmaops_from_aops(a_opsp,
 						INM_ORG_ADDR_SPACE_OPS);
 	if (t_inma_opsp) {
 		/* some body else added the new node */
-		INM_UP_WRITE(&driver_ctx->dc_inmaops_sem);
+		unlock_inmaops(TRUE, &lock_flag);
 		goto xchange;
 	}
 	t_inma_opsp = inm_alloc_inma_ops();
 	if (!t_inma_opsp) {
-		INM_UP_WRITE(&driver_ctx->dc_inmaops_sem);
+		unlock_inmaops(TRUE, &lock_flag);
 		ret = -ENOMEM;
 		goto exit;
 	}
@@ -1297,7 +1315,7 @@ inm_prepare_tohandle_recursive_writes(struct inode *inodep)
 							sizeof(*a_opsp));
 	inm_list_add_tail(&t_inma_opsp->ia_list,
 					&driver_ctx->dc_inma_ops_list);
-	INM_UP_WRITE(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(TRUE, &lock_flag);
 
 xchange:
 
@@ -1320,12 +1338,13 @@ void
 inm_restore_org_addr_space_ops(struct inode *inodep)
 {
 	inma_ops_t *t_inma_opsp = NULL;
+	unsigned long lock_flag;
 
-	INM_DOWN_READ(&driver_ctx->dc_inmaops_sem);
+	lock_inmaops(FALSE, &lock_flag);
 	t_inma_opsp = inm_get_inmaops_from_aops(
 			    (inm_address_space_operations_t *)inodep->i_mapping->a_ops,
 						INM_DUP_ADDR_SPACE_OPS);
-	INM_UP_READ(&driver_ctx->dc_inmaops_sem);
+	unlock_inmaops(FALSE, &lock_flag);
 	if (t_inma_opsp) {
 		(void)xchg(&inodep->i_mapping->a_ops,
 			   t_inma_opsp->ia_org_aopsp);
