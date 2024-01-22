@@ -29,7 +29,7 @@ ifeq (, $(VERSION_MAJOR))
 endif
 
 ifeq (, $(VERSION_MINOR))
-	VERSION_MINOR:=0
+	VERSION_MINOR:=1
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
