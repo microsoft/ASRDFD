@@ -1,0 +1,60 @@
+# Yaml configuration file for generating Ubuntu-22.04 official builds.
+trigger: none
+schedules:
+- cron: "0 12 * * 0"
+  displayName: Weekly Sunday build
+  branches:
+    include:
+    - develop
+  always: true
+
+variables:
+  REPOROOT: $(Build.SourcesDirectory)
+  OUTPUTROOT: $(REPOROOT)/out
+  TESTOUTPUTROOT: $(OUTPUTROOT)/TEST
+  OS: 'UBUNTU-22.04-64'
+  ONEBRANCH_AME_ACR_LOGIN: cdpx5d0f2841795b49c69ab1c2195fc9a4ea00.azurecr.io
+  LinuxContainerImage: 'cdpx5d0f2841795b49c69ab1c2195fc9a4ea00.azurecr.io/official/inmage-azure-siterecovery:ubuntu22_20230502.2'
+  CDP_BUILD_TAG: ubuntu2204
+
+resources:
+  repositories:
+    - repository: InMage-ASRDFD
+      type: git
+      name: One/InMage-ASRDFD
+      ref: develop
+
+extends:
+  template: v2/OneBranch.Official.CrossPlat.yml@InMage-ASRDFD
+  parameters:
+    cloudvault:
+      enabled: true
+      runmode: stage
+      artifacts:
+        - drop_build_main
+    globalSdl:
+        tsa:
+          enabled: true
+        binskim:
+          break: false
+        policheck:
+          break: false
+      # Enable the CodeQL only on develop branch
+        codeql:
+          compiled:
+            ${{ if eq(variables['Build.SourceBranchName'], 'develop') }}:
+              Codeql.Enabled: true
+              enabled: true
+            ${{ else }}:
+              Codeql.Enabled: false
+              enabled: false
+
+    stages:
+    - stage: build
+      jobs:
+      - job: main
+        pool:
+          type: linux
+
+        variables:
+          ob_outputDirectory: '$(Build.SourcesDirectory)/out'
