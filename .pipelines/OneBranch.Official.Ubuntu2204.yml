@@ -32,6 +32,7 @@ resources:
   repositories: 
     - repository: templates
       type: github
+      endpoint: github.com_VivaPen
       name: OneBranch.Pipelines/GovernedTemplates
       ref: refs/heads/main
 
