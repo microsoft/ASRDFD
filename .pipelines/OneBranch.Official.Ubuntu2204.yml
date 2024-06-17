@@ -30,6 +30,10 @@ variables:
 
 resources:
   repositories: 
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
     - repository: microsoft/ASRDFD
       type: github
       endpoint: github.com_VivaPen
@@ -37,6 +41,7 @@ resources:
       ref: refs/heads/main
 
 extends:
+  template: v2/OneBranch.Official.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
   parameters:
     cloudvault: # https://aka.ms/obpipelines/cloudvault
       enabled: false # set to true to enable cloudvault
