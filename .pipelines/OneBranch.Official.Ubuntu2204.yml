@@ -37,7 +37,7 @@ resources:
       ref: refs/heads/main
 
 extends:
-  #template: v2/OneBranch.Official.CrossPlat.yml@ASRDFD # https://aka.ms/obpipelines/templates
+  template: v2/OneBranch.Official.CrossPlat.yml@ASRDFD # https://aka.ms/obpipelines/templates
   parameters:
     cloudvault: # https://aka.ms/obpipelines/cloudvault
       enabled: false # set to true to enable cloudvault
