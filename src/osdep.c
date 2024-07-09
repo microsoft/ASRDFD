@@ -207,10 +207,12 @@ is_rootfs_ro(void)
 		bdevp = inm_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 		if (!IS_ERR(bdevp)) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
-			inm_super_block_t *sbp = bdevp->bd_super;
+			if (bdev_read_only(bdevp)) {
+				dbg("root is read only file system \n");
+				retval = 1;
+			}
 #else
 			inm_super_block_t *sbp = get_super(bdevp);
-#endif
 
 			if (sbp) {
 #define INM_FS_RDONLY 1
@@ -218,10 +220,10 @@ is_rootfs_ro(void)
 					dbg("root is read only file system \n");
 					retval = 1;
 				}
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
 				drop_super(sbp);
-#endif
 			}
+#endif
+
 			close_bdev(bdevp, FMODE_READ);
 		}
 	return retval;
@@ -1439,7 +1441,12 @@ print_AT_stat(target_context_t *tcp, char *page, inm_s32_t *len)
 struct block_device *
 inm_open_by_devnum(dev_t dev, unsigned mode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,7,0)
+	struct bdev_handle *handle;
+
+	handle = bdev_open_by_dev(dev, mode, NULL, NULL);
+	return handle->bdev;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
 	return blkdev_get_by_dev(dev, mode, NULL, NULL);
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
 	return blkdev_get_by_dev(dev, mode, NULL);
@@ -3534,7 +3541,10 @@ inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 inm_s32_t
 inm_blkdev_get(inm_bio_dev_t *bdev)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
+	return (IS_ERR(bdev_open_by_dev(bdev->bd_dev,
+			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
 			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
