@@ -39,6 +39,7 @@
 
 extern driver_context_t *driver_ctx;
 static inm_s32_t reorg_datapool(inm_u32_t);
+static int reorganize_datapool(void);
 #ifdef INM_LINUX
 extern inm_s32_t driver_state;
 #endif
@@ -343,8 +344,7 @@ int generic_worker_thread_function(void *context)
 		 * may not get a chance for a long time if a lot of work item has to processed.
 		 */
 
-		reorg_datapool(work_q->flags);
-		work_q->flags &= ~WQ_FLAGS_REORG_DP_ALLOC;
+		reorganize_datapool();
 		if (!wakeup_event) {
 			inm_flush_ts_and_seqno_to_file(FALSE);
 			INM_SPIN_LOCK_IRQSAVE(&driver_ctx->clean_shutdown_lock, lock_flag);
@@ -433,6 +433,25 @@ int generic_worker_thread_function(void *context)
 	return 0;
 }
 
+static int reorganize_datapool()
+{
+	int req_pages = 0;
+	int num_pages = 0;
+	int ret = 0;
+
+	if (driver_ctx->dc_pool_allocation_completed)
+		return 0;
+	req_pages = driver_ctx->tunable_params.data_pool_size;
+	req_pages <<= (MEGABYTE_BIT_SHIFT - INM_PAGESHIFT);
+	INM_BUG_ON((req_pages) < (driver_ctx->data_flt_ctx.pages_allocated));
+	num_pages = req_pages - driver_ctx->data_flt_ctx.pages_allocated;
+	if (num_pages > 0) {
+		ret = add_data_pages(num_pages);
+		if (ret == 0)
+			driver_ctx->dc_pool_allocation_completed = 1;
+	}
+	return ret;
+}
 #define SAMPLE_WINDOW 0xa		   /* 10 sampling for rate of comsumption of pages*/
 
 #define INM_REORG_WAITING_TIME_SEC  2
@@ -652,7 +671,5 @@ reorg_done:
 
 inm_s32_t wrap_reorg_datapool()
 {
-	inm_u32_t flag = 0;
-	flag |= WQ_FLAGS_REORG_DP_ALLOC;
-	return reorg_datapool(flag);
+	return reorganize_datapool();
 }

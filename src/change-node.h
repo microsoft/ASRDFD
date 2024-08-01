@@ -205,6 +205,7 @@ void commit_change_node(change_node_t *change_node);
 inm_page_t *get_page_from_page_pool(int, int, struct inm_writedata *);
 change_node_t *inm_alloc_change_node(struct inm_writedata *, unsigned);
 void inm_free_change_node(change_node_t *);
+void inm_free_nonpoolpage(inm_page_t *);
 void inm_free_metapage(inm_page_t *);
 void update_change_node(change_node_t *chg_node,
 		struct _write_metadata_tag *wmd, inm_tsdelta_t *tdp);
@@ -232,7 +233,7 @@ inm_s32_t verify_change_node_file(change_node_t *cnode);
 
 void do_perf_changes(struct _target_context *tgt_ctxt, 
 				change_node_t *recent_cnode, int path);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 void do_perf_changes_all(struct _target_context *tgt_ctxt, int path);
 void move_chg_nodes_to_drainable_queue(void);
 #endif

@@ -361,6 +361,11 @@ typedef struct _target_context {
 	inm_atomic_t    tc_nr_chain_bios_pending;
 	inm_atomic_t    tc_nr_completed_in_child_stack;
 	inm_atomic_t    tc_nr_completed_in_own_stack;
+	inm_atomic_t    tc_nr_bio_reentrant;
+	inm_atomic_t    tc_nr_chain_bio_reentrant;
+	inm_s64_t       tc_bio_reentrant_size;
+	inm_s64_t       tc_chain_bio_reentrant_size;
+	inm_s64_t       tc_bio_reentrant_orig_size;
 #if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
 	inm_atomic_t    tc_nr_write_zero_bios;
 #endif
@@ -401,6 +406,7 @@ do { 										\
 #define VCF_VOLUME_LOCKED            0x00080000
 #define VCF_IGNORE_BITMAP_CREATION   0x00100000
 #define VCF_DATAFILE_DIR_CREATED     0x00200000
+#define VCF_NVME_DEVICE              0x00400000
 #define VCF_VOLUME_FROZEN_SYS_SHUTDOWN  0x00800000
 #define VCF_MIRRORING_PAUSED         0x01000000
 #define	VCF_VOLUME_STACKED_PARTIALLY 0x02000000

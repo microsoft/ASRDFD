@@ -51,7 +51,7 @@ typedef host_dev_ctx_t *host_dev_ctxp;
 #define INM_BIOSZ		sizeof(dm_bio_info_t)
 #define INM_IOINFO_MPOOL_SZ	(INM_PAGESIZE/sizeof(dm_bio_info_t))
 /* filtering definitions */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 #ifndef queue_rq_fn
 typedef blk_status_t (queue_rq_fn)(struct blk_mq_hw_ctx *,
 		const struct blk_mq_queue_data *);

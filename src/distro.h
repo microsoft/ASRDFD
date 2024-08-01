@@ -20,6 +20,17 @@
 #ifndef _DISTRO_H
 #define _DISTRO_H
 
+/* Ubuntu */
+#if (defined ubuntu)
+#if (DISTRO_VER == 18)
+#define UBUNTU1804
+#elif (DISTRO_VER == 20)
+#define UBUNTU2004
+#elif (DISTRO_VER == 22)
+#define UBUNTU2204
+#endif
+#endif
+
 /* SLES 11 */
 #if (defined suse && DISTRO_VER == 11)
 #define SLES11

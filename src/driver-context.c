@@ -199,7 +199,7 @@ inm_s32_t init_driver_context(void)
 	driver_ctx->svagent_pid = 0;
 	driver_ctx->svagent_idhp = NULL;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	INM_INIT_SPIN_LOCK(&driver_ctx->dc_inmaops_lock);
 #else
 	INM_RW_SEM_INIT(&driver_ctx->dc_inmaops_sem);
@@ -359,7 +359,7 @@ void free_driver_context(void)
 	INM_UP_WRITE(&driver_ctx->tag_guid_list_sem);
 
 	INM_DESTROY_COMPLETION(&driver_ctx->shutdown_completion);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	INM_DESTROY_SPIN_LOCK(&driver_ctx->dc_inmaops_lock);
 #else
 	INM_RW_SEM_DESTROY(&driver_ctx->dc_inmaops_sem);
@@ -479,7 +479,7 @@ inm_s32_t alloc_cache_pools()
 			goto next;
 		}
 		inm_list_add_tail(&pg->entry, &driver_ctx->page_pool);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		pg->flags = METAPAGE_ALLOCED_FROM_POOL;
 #endif
 		i++;
@@ -659,7 +659,7 @@ retry:
 /* lock inmaops with read or write, read = 0, write = 1 */
 void lock_inmaops(bool write, unsigned long* lock_flag)
 {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
     INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_inmaops_lock, *lock_flag);
 #else
     if (write) {
@@ -674,7 +674,7 @@ void lock_inmaops(bool write, unsigned long* lock_flag)
 /* unlock inmaops with read or write, read = 0, write = 1 */
 void unlock_inmaops(bool write, unsigned long* lock_flag)
 {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
     INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_inmaops_lock, *lock_flag);
 #else
     if (write) {

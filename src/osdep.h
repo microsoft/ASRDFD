@@ -83,6 +83,22 @@
 #include <linux/sched/signal.h>
 #endif
 
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8) || \
+	(defined(UBUNTU1804) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)) || defined(UBUNTU2004) || \
+	defined(OL7UEK6)
+#ifndef INM_QUEUE_RQ_ENABLED
+#define INM_QUEUE_RQ_ENABLED
+#endif
+#endif
+
+#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8) || \
+	(defined(UBUNTU1804) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)) || defined(UBUNTU2004) || \
+	defined(OL7UEK6) || (defined(RHEL7) && !defined(UEK))
+#ifndef INM_CHAIN_BIO_ENABLED
+#define INM_CHAIN_BIO_ENABLED
+#endif
+#endif
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,19,0)
 
 typedef struct _lookup {
@@ -128,7 +144,7 @@ struct _mirror_vol_entry;
 /* filtering specific section */
 typedef struct _dm_bio_info
 {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	struct inm_list_head entry;
 #endif
 	sector_t bi_sector;
@@ -176,7 +192,7 @@ typedef struct _req_q_info
 	struct kobj_type *orig_kobj_type;
 	struct request_queue *q;
 	int rqi_flags;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	struct blk_mq_ops *orig_mq_ops;
 	struct blk_mq_ops mod_mq_ops;
 	void *tc;
@@ -225,7 +241,7 @@ inm_s32_t is_rootfs_ro(void);
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
 inm_block_device_t *open_by_dev_path(char *, int);
 inm_block_device_t *open_by_dev_path_v2(char *, int);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
@@ -455,6 +471,9 @@ inm_s32_t process_remove_iobarrier_ioctl(inm_devhandle_t *idhp,
 inm_s32_t process_create_iobarrier_ioctl(inm_devhandle_t *idhp, 
 			                             void __INM_USER *arg);
 inm_s32_t test_timer(inm_devhandle_t *idhp, void __INM_USER *arg);
+
+inm_s32_t remove_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len);
+
 /* Synchronisation wrappers */
 typedef wait_queue_head_t		inm_wait_queue_head_t;
 #define INM_INIT_WAITQUEUE_HEAD(event)                                  \
@@ -473,7 +492,7 @@ typedef struct completion		inm_completion_t;
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 #define INM_COMPLETE_AND_EXIT(event, val)				\
 		kthread_complete_and_exit(event, val)
 #else
@@ -669,7 +688,7 @@ typedef struct _page_wrapper {
 	struct inm_list_head entry;
 	unsigned long *cur_pg;
 	inm_u32_t nr_chgs;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_u32_t flags;
 #endif
 } inm_page_t;
@@ -891,7 +910,7 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #endif
 #endif
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 typedef struct {
     /* empty dummy */
 } mm_segment_t;

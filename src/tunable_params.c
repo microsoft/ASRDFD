@@ -578,7 +578,7 @@ ssize_t inm_chained_io_read(char *fname)
 	}
 
 set_default:
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_CHAIN_BIO_ENABLED
 	driver_ctx->tunable_params.enable_chained_io = 1;
 #else
 	driver_ctx->tunable_params.enable_chained_io = 0;
