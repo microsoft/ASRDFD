@@ -329,6 +329,8 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 	INM_ATOMIC_SET(&(ctx->tc_nr_chain_bios_pending), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_completed_in_child_stack), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_completed_in_own_stack), 0);
+	INM_ATOMIC_SET(&(ctx->tc_nr_bio_reentrant), 0);
+	INM_ATOMIC_SET(&(ctx->tc_nr_chain_bio_reentrant), 0);
 #if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
 	INM_ATOMIC_SET(&(ctx->tc_nr_write_zero_bios), 0);
 #endif
@@ -1045,9 +1047,7 @@ set_tgt_ctxt_wostate(target_context_t *tgt_ctxt, etWriteOrderState new_wostate,
 	/* add the value to respective write order state. */
 	tgt_ctxt->tc_stats.num_secs_in_wostate[curr_wostate] += time_in_secs;
 
-	if (curr_wostate == ecWriteOrderStateData)
-		telemetry_nwo_stats_record(tgt_ctxt, curr_wostate, 
-							new_wostate, reason);
+	telemetry_nwo_stats_record(tgt_ctxt, curr_wostate, new_wostate, reason);
 
 	switch (new_wostate) {
 	case ecWriteOrderStateData:

@@ -269,7 +269,7 @@ inm_alloc_change_node(inm_wdata_t *wdatap, unsigned flags)
 void inm_free_change_node(change_node_t *node)
 {
 #ifndef INM_AIX
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	if (node->flags & CHANGE_NODE_ALLOCED_FROM_POOL) {
 		unsigned long lock_flag = 0;
 
@@ -296,7 +296,7 @@ change_node_t *get_change_node_to_update(target_context_t *tgt_ctxt,
 	change_node_t *recent_cnode = NULL;
 	struct inm_list_head *ptr;
 	int perf_changes = 1;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	int is_barrier_on = 0;
 #endif
 
@@ -313,7 +313,7 @@ change_node_t *get_change_node_to_update(target_context_t *tgt_ctxt,
 	 * data-mode change node while the meta-data-mode node is limited by
 	 * MAX_CHANGE_INFOS_PER_PAGE.
 	 */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	if ((INM_ATOMIC_READ(&driver_ctx->is_iobarrier_on)) ) {
 		is_barrier_on = 1;
 		perf_changes = 0;
@@ -443,7 +443,7 @@ alloc_chg_node:
 		ref_chg_node(node);
 		node->transaction_id = 0;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		if (is_barrier_on) {
 			inm_list_add_tail(&node->next,
 					&tgt_ctxt->tc_non_drainable_node_head);
@@ -497,7 +497,7 @@ void do_perf_changes(target_context_t *tgt_ctxt, change_node_t *recent_cnode,
 	}
 }
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 void do_perf_changes_all(target_context_t *tgt_ctxt, int path)
 {
 	inm_list_head_t *ptr = NULL, *nextptr = NULL;
@@ -961,24 +961,32 @@ change_node_t *get_change_node_for_usertag(target_context_t *tgt_ctxt,
 	return chg_node;
 }
 
+void inm_free_nonpoolpage(inm_page_t *pgp)
+{
+    INM_UNPIN(pgp->cur_pg, INM_PAGESZ);
+    INM_FREE_PAGE(pgp->cur_pg, INM_KERNEL_HEAP);
+    pgp->cur_pg = NULL;
+    INM_UNPIN(pgp, sizeof(inm_page_t));
+    INM_KFREE(pgp, sizeof(inm_page_t), INM_KERNEL_HEAP);
+}
+
 void inm_free_metapage(inm_page_t *pgp)
 {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	if (pgp->flags & METAPAGE_ALLOCED_FROM_POOL) {
 		unsigned long lock_flag = 0;
 
 		INM_SPIN_LOCK_IRQSAVE(&driver_ctx->page_pool_lock, lock_flag);
 		INM_ATOMIC_INC(&driver_ctx->dc_nr_metapages_alloced);
 		inm_list_add_tail(&pgp->entry, &driver_ctx->page_pool);
+		driver_ctx->dc_res_cnode_pgs++;
 		INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->page_pool_lock,
 								lock_flag);
 	}
+	else
+		inm_free_nonpoolpage(pgp);
 #else
-	INM_UNPIN(pgp->cur_pg, INM_PAGESZ);
-	INM_FREE_PAGE(pgp->cur_pg, INM_KERNEL_HEAP);
-	pgp->cur_pg = NULL;
-	INM_UNPIN(pgp, sizeof(inm_page_t));
-	INM_KFREE(pgp, sizeof(inm_page_t), INM_KERNEL_HEAP);
+	inm_free_nonpoolpage(pgp);
 #endif
 }
 
@@ -989,7 +997,7 @@ void cleanup_change_node(change_node_t *chg_node)
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_META))){
 		info("entered");
-	}	
+	}
 
 
 	/* If change node on non write order data mode list, then
@@ -1233,7 +1241,7 @@ get_page_from_page_pool(inm_s32_t alloc_from_page_pool, inm_s32_t flag,
 	if(alloc_from_page_pool) {
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->page_pool_lock, lock_flag);
 	if(inm_list_empty(&driver_ctx->page_pool)) {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		INM_ATOMIC_INC(&driver_ctx->dc_nr_metapage_allocs_failed);
 #endif
 		INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->page_pool_lock,
@@ -1245,7 +1253,7 @@ get_page_from_page_pool(inm_s32_t alloc_from_page_pool, inm_s32_t flag,
 
 	/* Decrement the number of free change nodes in the list. */
 	driver_ctx->dc_res_cnode_pgs--;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	INM_ATOMIC_DEC(&driver_ctx->dc_nr_metapages_alloced);
 	INM_ATOMIC_INC(&driver_ctx->dc_nr_metapages_alloced_from_pool);
 	wake_up_interruptible(&driver_ctx->dc_alloc_thread_waitq);
@@ -1952,7 +1960,7 @@ void commit_change_node(change_node_t *chg_node)
 			(chg_node->flags & CHANGE_NODE_IN_NWO_CLOSED));
 	}
 	deref_chg_node(chg_node);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_alloc_pools();
 #else
 	balance_page_pool(INM_KM_SLEEP, 0);
@@ -2174,7 +2182,7 @@ perform_commit(target_context_t *ctxt, COMMIT_TRANSACTION *commit,
 }
 
 void balance_page_pool(inm_s32_t alloc_flag, int quit) {
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_s32_t threshold = 1024;
 #else
 	inm_s32_t threshold = 256;
@@ -2214,7 +2222,7 @@ void balance_page_pool(inm_s32_t alloc_flag, int quit) {
 		INM_SPIN_LOCK_IRQSAVE(&driver_ctx->page_pool_lock, lock_flag);
 		driver_ctx->dc_res_cnode_pgs ++;
 		inm_list_add_tail(&pg->entry, &driver_ctx->page_pool);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		pg->flags = METAPAGE_ALLOCED_FROM_POOL;
 		INM_ATOMIC_INC(&driver_ctx->dc_nr_metapages_alloced);
 #endif

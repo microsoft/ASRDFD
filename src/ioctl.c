@@ -773,7 +773,7 @@ inm_s32_t remove_filter_device(char *uuid)
 {
 	target_context_t *tgt_ctxt = NULL;
 
-#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 	info("Removing filter device : %s", uuid);
 	INM_DOWN_WRITE(&driver_ctx->tgt_list_sem);
 	tgt_ctxt = get_tgt_ctxt_from_device_name_locked(uuid);
@@ -1064,7 +1064,7 @@ inm_s32_t process_get_db_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 		return -EFAULT;
 	}
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_alloc_pools();
 #else
 	balance_page_pool(INM_KM_SLEEP, 0);
@@ -1531,7 +1531,7 @@ inm_s32_t process_sys_shutdown_notify_ioctl(inm_devhandle_t *idhp,
 		return -EFAULT;
 
 	err("system_shutdown is informed to inm driver");
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	move_chg_nodes_to_drainable_queue();
 #endif
 
@@ -2322,7 +2322,7 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 		"Reserved change-node pages  : %u Pages\n",
 		(driver_ctx->dc_res_cnode_pgs));
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Reserved BIOInfo/failed     : %d/%d\n",
 		INM_ATOMIC_READ(&driver_ctx->dc_nr_bioinfo_alloced),
@@ -2348,8 +2348,9 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	len += snprintf(page+len, (INM_PAGESZ - len), "\nData Mode Info:\n");
 	len += snprintf(page+len, (INM_PAGESZ - len), "---------------\n");
 	len += snprintf(page+len, (INM_PAGESZ - len),
-		 "Data Pool Size Allocated    : %llu MB(%u pages)\n", 
-		 mb_allocated, driver_ctx->data_flt_ctx.pages_allocated);
+		"Data Pool Size Allocated/Required    : %llu MB(%u pages)/%u MB\n",
+		mb_allocated, driver_ctx->data_flt_ctx.pages_allocated,
+		driver_ctx->tunable_params.data_pool_size);
 
 	if (mb_free){ 	
 		len += snprintf(page+len, (INM_PAGESZ - len),
@@ -2799,6 +2800,17 @@ process_get_volume_stats_ioctl(inm_devhandle_t *handle, void * arg)
 			"Chain Bio in child/Own stack        : %d/%d\n", 
 			INM_ATOMIC_READ(&ctxt->tc_nr_completed_in_child_stack),
 			INM_ATOMIC_READ(&ctxt->tc_nr_completed_in_own_stack));
+
+		len += snprintf(page+len, (INM_PAGESZ - len),
+			"Re-entrant bio count/extra size/orig size           : %d/%lld/%lld\n", 
+			INM_ATOMIC_READ(&ctxt->tc_nr_bio_reentrant),
+			ctxt->tc_bio_reentrant_size,
+			ctxt->tc_bio_reentrant_orig_size);
+
+		len += snprintf(page+len, (INM_PAGESZ - len),
+			"Re-entrant chain bio count/extra size           : %d/%lld\n", 
+			INM_ATOMIC_READ(&ctxt->tc_nr_chain_bio_reentrant),
+			ctxt->tc_chain_bio_reentrant_size);
 
 #if (defined REQ_OP_WRITE_ZEROES || defined OL7UEK5)
 		len += snprintf(page+len, (INM_PAGESZ - len),
