@@ -42,7 +42,7 @@
 /* Version information stated with Driver Version 2.0.0.0 */
 #define DRIVER_MAJOR_VERSION    0x02
 #define DRIVER_MINOR_VERSION    0x03
-#define DRIVER_MINOR_VERSION2   0x0f
+#define DRIVER_MINOR_VERSION2   0x4f
 #define DRIVER_MINOR_VERSION3   0x3f
 
 /*freeze, thaw, tag volume return status */
@@ -58,6 +58,8 @@
 #define STATUS_TAG_WO_METADATA   0x0004
 
 #define TAG_FS_FROZEN_IN_USERSPACE 0x0004
+
+#define TAG_DISK_DRAIN_BARRIER 0x0001
 
 #define VACP_IOBARRIER_TIMEOUT          300     /* in ms */
 #define VACP_TAG_COMMIT_TIMEOUT         300     /* in ms */
