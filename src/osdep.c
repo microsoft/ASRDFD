@@ -72,7 +72,7 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -946,7 +946,7 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -958,7 +958,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4)
 	 struct gendisk *disk = NULL;
 #endif
 	 struct scsi_device *sdp = NULL;
@@ -968,7 +968,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 		 goto out;
 	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
@@ -976,7 +976,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
@@ -1439,7 +1439,7 @@ print_AT_stat(target_context_t *tcp, char *page, inm_s32_t *len)
 struct block_device *
 inm_open_by_devnum(dev_t dev, unsigned mode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4)
 	return blkdev_get_by_dev(dev, mode, NULL, NULL);
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
 	return blkdev_get_by_dev(dev, mode, NULL);
@@ -2805,6 +2805,22 @@ tag_fail:
 	return ret;
 }
 
+/*
+ * barrier_all_timeout
+ *
+ * Rollback barrier on timeout
+ */
+void
+barrier_all_timeout(wqentry_t *not_used)
+{
+	err("Starting timeout procedure at %lu", jiffies);
+	/* take the lock*/
+	remove_io_barrier_all(driver_ctx->dc_cp_guid,
+				          sizeof(driver_ctx->dc_cp_guid));
+	commit_tags_v2(driver_ctx->dc_cp_guid, TAG_REVOKE, 1);
+	return;
+}
+
 
 /*
  * process ioctl to:
@@ -2825,11 +2841,15 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	tag_telemetry_common_t *tag_common = NULL;
 	etMessageType msg = ecMsgUninitialized;
 	int tag_failed = 0;
+	int commit_pending;
+	int tag_commit_required = 0;
+	int is_root_disk_drain_barrier_set = 0;
+	int tag_all_volumes = 0;
 
 	dbg("entered process_iobarrier_tag_volume_ioctl");
 
 	tag_common = telemetry_tag_common_alloc(IOCTL_INMAGE_IOBARRIER_TAG_VOLUME);
-	
+
 	if(!INM_ACCESS_OK(VERIFY_READ, (void __INM_USER *)arg,
 				                   sizeof(tag_info_t_v2))) {
 		err("Read access violation for tag_info_t_v2");
@@ -2934,11 +2954,11 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 	dbg("creating io barrier\n");
 	INM_DOWN_WRITE(&(driver_ctx->tgt_list_sem));
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	volume_lock_all_close_cur_chg_node();
 #endif
 	INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 1);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	get_time_stamp_tag(&driver_ctx->dc_crash_tag_timestamps);
 	volume_unlock_all();
 #endif
@@ -2951,6 +2971,7 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	/* get list of all the protected volumes if the below falg is set */
 	if ((tag_vol->flags & TAG_ALL_PROTECTED_VOLUME_IOBARRIER) ==
 				          TAG_ALL_PROTECTED_VOLUME_IOBARRIER) {
+		tag_all_volumes = 1;
 		dbg("issuing tag to all volumes");
 		memcpy_s(&driver_ctx->dc_cp_guid,
 				sizeof(driver_ctx->dc_cp_guid),
@@ -2987,6 +3008,10 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 		goto remove_io_barrier;
 	}
 
+	if (!driver_ctx->dc_root_disk) {
+		info("Failed to get root disk details from driver context");
+	}
+
 	for(numvol = 0; numvol < tag_vol->nr_vols; numvol++) {
 
 		/* mem set the buffer before using it */
@@ -3008,8 +3033,25 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 		/* process the tag volume list */
 		tag_vol->vol_info->vol_name[TAG_VOLUME_MAX_LENGTH - 1] = '\0';
+		commit_pending = TAG_COMMIT_NOT_PENDING;
+		if (tag_vol->vol_info->flags & TAG_DISK_DRAIN_BARRIER) {
+			commit_pending = TAG_COMMIT_PENDING;
+			tag_commit_required = 1;
+			if (driver_ctx->dc_root_disk) {
+				if (strcmp(driver_ctx->dc_root_disk->tc_guid,
+					tag_vol->vol_info->vol_name)) {
+					info ("Drain barrier is set for non root disk : %s, "
+						"root disk : %s", tag_vol->vol_info->vol_name,
+						driver_ctx->dc_root_disk->tc_guid);
+				}
+				else {
+					is_root_disk_drain_barrier_set = 1;
+				}
+			}
+		}
+
 		ret = process_tag_volume(tag_vol, tag_list,
-						TAG_COMMIT_NOT_PENDING);
+						commit_pending);
 		if(ret) {
 			if (ret == INM_EAGAIN)
 				tag_failed = 1;
@@ -3033,6 +3075,12 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 			break;
 		}
 		arg += sizeof(*tag_vol->vol_info);
+	}
+
+	if (driver_ctx->dc_root_disk &&
+		(is_root_disk_drain_barrier_set == 0)) {
+		info ("Drain barrier not set for os disk : %s",
+			driver_ctx->dc_root_disk->tc_guid);
 	}
 
 	if (tag_failed)
@@ -3063,10 +3111,20 @@ remove_io_barrier:
 	dbg("removing io barrier\n");
 	INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 0);
 	INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	move_chg_nodes_to_drainable_queue();
 #endif
 	dbg("removed io barrier");
+
+	if (tag_commit_required) {
+		memcpy_s(&driver_ctx->dc_cp_guid,
+				sizeof(driver_ctx->dc_cp_guid),
+				tag_vol->tag_guid, sizeof(tag_vol->tag_guid));
+		start_cp_timer(tag_vol->timeout, barrier_all_timeout);
+	}
+	else if (!tag_all_volumes) {
+		info("No volumes passed with drain barrier flag set");
+	}
 
 unlock_cp_mutex:
 	INM_UP(&driver_ctx->dc_cp_mutex);
@@ -3146,7 +3204,7 @@ remove_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len)
 			dbg("Guid matched, removing barrier");
 			INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
 			INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 0);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 			move_chg_nodes_to_drainable_queue();
 #endif
 			driver_ctx->dc_cp &= ~INM_CP_CRASH_ACTIVE;
@@ -3165,22 +3223,6 @@ remove_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len)
 	INM_UP(&driver_ctx->dc_cp_mutex);
 
 	return error;
-}
-
-/*
- * barrier_all_timeout
- *
- * Rollback barrier on timeout
- */
-void
-barrier_all_timeout(wqentry_t *not_used)
-{
-	err("Starting timeout procedure at %lu", jiffies);
-	/* take the lock*/
-	remove_io_barrier_all(driver_ctx->dc_cp_guid,
-				          sizeof(driver_ctx->dc_cp_guid));
-	commit_tags_v2(driver_ctx->dc_cp_guid, TAG_REVOKE, 1);
-	return;
 }
 
 /*
@@ -3233,11 +3275,11 @@ create_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len, int timeout_ms)
 				goto out_err;
 			}
 		}
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		volume_lock_all_close_cur_chg_node();
 #endif
 		INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 1);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		get_time_stamp_tag(&driver_ctx->dc_crash_tag_timestamps);
 		volume_unlock_all();
 #endif
@@ -3524,7 +3566,7 @@ log_console(const char *fmt, ...)
 void
 inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 {
-#if defined(RHEL9_2) || defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	snprintf(name, INM_BDEVNAME_SIZE, "%pg", bdev);
 #else
 	bdevname(bdev, name);
@@ -3534,7 +3576,7 @@ inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 inm_s32_t
 inm_blkdev_get(inm_bio_dev_t *bdev)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
 			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)

@@ -29,7 +29,7 @@ ifeq (, $(VERSION_MAJOR))
 endif
 
 ifeq (, $(VERSION_MINOR))
-	VERSION_MINOR:=1
+	VERSION_MINOR:=0
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
@@ -68,6 +68,13 @@ EXTRA_CFLAGS += -D${VENDOR}
 
 ifeq (yes, $(noerror))
 	EXTRA_CFLAGS += -Wno-error
+endif
+
+ifeq ($(findstring ubuntu, $(VENDOR)), ubuntu)
+	DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
+			grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
+			cut -d"." -f 1)
+	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
 endif
 
 ifeq ($(findstring suse, $(VENDOR)), suse)
@@ -164,8 +171,12 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 		EXTRA_CFLAGS += -DRHEL9_2
 	endif
 
-	ifeq ($(findstring 5.14.0-362.8.1.el9_3.x86_64, $(KDIR)), 5.14.0-362.8.1.el9_3.x86_64)
+	ifeq ($(findstring 5.14.0-362, $(KDIR)), 5.14.0-362)
 		EXTRA_CFLAGS += -DRHEL9_3
+	endif
+
+	ifeq ($(findstring 5.14.0-427, $(KDIR)), 5.14.0-427)
+		EXTRA_CFLAGS += -DRHEL9_4
 	endif
 
 	ifeq ($(findstring uek, $(KDIR)), uek)
@@ -176,6 +187,9 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 	endif
 	ifeq ($(findstring 4.14.35-1902.0.18.el7uek.x86_64, $(KDIR)), 4.14.35-1902.0.18.el7uek.x86_64)
 		EXTRA_CFLAGS += -DOL7UEK5
+	endif
+	ifeq ($(findstring 5.4.17-2011.1.2.el7uek.x86_64, $(KDIR)), 5.4.17-2011.1.2.el7uek.x86_64)
+		EXTRA_CFLAGS += -DOL7UEK6
 	endif
 	ifeq ($(findstring 5.15.0-0.30.19.el9uek.x86_64, $(KDIR)), 5.15.0-0.30.19.el9uek.x86_64)
 		EXTRA_CFLAGS += -DOL9UEK7

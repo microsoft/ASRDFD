@@ -207,13 +207,13 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 		if(INM_ATOMIC_DEC_AND_TEST(&q_info->vol_users)){
 			remove_qinfo_from_dc(q_info);
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 			(void)xchg(&q_info->q->mq_ops, q_info->orig_mq_ops);
 #else
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
 #else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
@@ -251,7 +251,7 @@ void init_tc_kobj(req_queue_info_t *q_info, inm_block_device_t *bdev,
 					struct kobject **hdc_disk_kobj_ptr)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
-#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if (defined(RHEL9) && !defined(OL9UEK7)) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 	*hdc_disk_kobj_ptr = bdev_kobj(bdev);
 #else
 	if (!bdev_is_partition(bdev)) {
@@ -364,7 +364,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
@@ -383,7 +383,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 #endif
 	q_info->q = q;
 	
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	if (q->disk->queue_kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
@@ -403,13 +403,13 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
 #else
 	q_info->orig_kobj_type =  q->kobj.ktype;
 #endif
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	q_info->tc = ctx;
 	q_info->orig_mq_ops = q->mq_ops;
 	memcpy_s(&q_info->mod_mq_ops, sizeof(struct blk_mq_ops),
@@ -420,7 +420,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
 #else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
@@ -1042,7 +1042,7 @@ free_bio_info:
 							INM_KERNEL_HEAP);
 		}
 		INM_DESTROY_SPIN_LOCK(&bio_info->bio_info_lock);
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 		inm_free_bio_info(bio_info);
 #else
 		INM_MEMPOOL_FREE(bio_info, hdcp->hdc_bio_info_pool);
@@ -1180,9 +1180,20 @@ flt_orig_endio(struct bio *bio, inm_s32_t error)
 void 
 flt_end_io_fn(struct bio *bio)
 {
-	if (!inm_bio_error(bio))
+	dm_bio_info_t *bio_info = bio->bi_private;
+	target_context_t *ctx = (target_context_t *)bio_info->tc;
+
+	if (!inm_bio_error(bio)) {
+		if (ctx->tc_flags & VCF_NVME_DEVICE) {
+			/* NVME devices are not resetting bio size to 0.
+			 * Setting bio size to 0 explicity here for copying
+			 * data pages at later state correctly
+			 */
+			INM_BUF_COUNT(bio) = 0;
+		}
 		INM_BUG_ON(INM_BUF_COUNT(bio) != 0);
-	
+	}
+
 	flt_end_io(bio, inm_bio_error(bio));
 }
 
@@ -1272,13 +1283,14 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 {
 	host_dev_ctx_t *hdcp = ctx->tc_priv;
 	change_node_t *chg_node;
+	dm_bio_info_t *orig_info;
 	int full_disk;
 	int alloced_from_pool = 0;
 
 	full_disk = 0;
 	chg_node = NULL;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	*bio_info = INM_KMALLOC(sizeof(dm_bio_info_t), 
 			 	GFP_ATOMIC | __GFP_NOWARN, INM_KERNEL_HEAP);
 	if (!(*bio_info)) {
@@ -1301,15 +1313,28 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 		err("Mempool Alloc Failed");
 		return;
 	}
-	INM_MEM_ZERO(*bio_info, sizeof(dm_bio_info_t));    
+	INM_MEM_ZERO(*bio_info, sizeof(dm_bio_info_t));
 
 	if (alloced_from_pool)
 		(*bio_info)->dm_bio_flags |= BINFO_ALLOCED_FROM_POOL;
 
 	volume_lock(ctx);
+	/* The below check is to identify cases of bio split.
+	 * If the original bio was itself a chain bio, below statistics wont include that data
+	 */
+	if (bio->bi_end_io == flt_end_io_fn) {
+		INM_ATOMIC_INC(&ctx->tc_nr_bio_reentrant);
+		ctx->tc_bio_reentrant_size += INM_BUF_COUNT(bio);
+		if (INM_IS_CHAINED_BIO(bio)) {
+			INM_ATOMIC_INC(&ctx->tc_nr_chain_bio_reentrant);
+			ctx->tc_chain_bio_reentrant_size += INM_BUF_COUNT(bio);
+		}
+		orig_info = (dm_bio_info_t *)(bio->bi_private);
+		ctx->tc_bio_reentrant_orig_size += orig_info->bi_size;
+	}
 	full_disk = ctx->tc_flags & VCF_FULL_DEV;
 	volume_unlock(ctx);
-	
+
 	if (full_disk) {
 		(*bio_info)->bi_sector  = INM_BUF_SECTOR(bio);
 	}
@@ -1338,7 +1363,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 
 		while (remaining_length) {
 			alloced_from_pool = 0;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 			chg_node = INM_KMALLOC(sizeof(change_node_t), 
 			GFP_ATOMIC | __GFP_NOWARN, INM_KERNEL_HEAP);
 			if (!chg_node) {
@@ -1408,7 +1433,7 @@ out_err:
 		chg_node->next.next = NULL;
 	inm_free_change_node(chg_node);
 	}
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_free_bio_info(*bio_info);
 #else    
 	INM_MEMPOOL_FREE(*bio_info, hdcp->hdc_bio_info_pool);
@@ -1526,7 +1551,7 @@ is_our_io(struct bio *biop)
 	return FALSE;
 }
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 #define NR_MAX_ALLOCATIONS	1024
 #define NR_MAX_FREED		128
 void inm_free_bio_info(dm_bio_info_t *bio_info)
@@ -1777,6 +1802,7 @@ void inm_balance_pools(void)
 		INM_KFREE(pg, sizeof(inm_page_t), INM_KERNEL_HEAP);
 		nr_free--;
 		INM_ATOMIC_DEC(&driver_ctx->dc_nr_metapages_alloced);
+		driver_ctx->dc_res_cnode_pgs--;
 	}
 	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->page_pool_lock, lock_flag);
 }
@@ -1863,7 +1889,7 @@ blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&q->kobj);
@@ -2303,7 +2329,7 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
-#if defined(RHEL9_3) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	qkobj = &disk->queue_kobj;
 #else
 	qkobj = &disk->queue->kobj;
@@ -2558,7 +2584,6 @@ stack_host_dev(target_context_t *ctx, inm_dev_extinfo_t *dinfo)
 	inm_s32_t ret = 0;
 	req_queue_info_t *q_info;
 	inm_s32_t found = 0;
-	inm_s32_t last_char_pos = 0;
 	inm_block_device_t *bdev;
 	host_dev_ctx_t *hdcp;
 	target_context_t *tgt_ctx;
@@ -2714,12 +2739,13 @@ retry:
 	hdcp->hdc_end_sect = hdcp->hdc_start_sect + (hdcp->hdc_volume_size >> 9) - 1;
 
 	volume_lock(ctx);
+	char nvme_device[] = "/dev/nvme";
+	if (strncmp(nvme_device, ctx->tc_guid, strlen(nvme_device)) == 0)
+		ctx->tc_flags |= VCF_NVME_DEVICE;
+
 	/* set full disk flag */
-	last_char_pos = strlen(tgt_ctx->tc_guid)-1; /* last char */
-	if ( ! ((tgt_ctx->tc_guid[last_char_pos] >= '0') &&
-				(tgt_ctx->tc_guid[last_char_pos] <= '9')) ) {
-		ctx->tc_flags |= VCF_FULL_DEV;
-	}
+	ctx->tc_flags |= VCF_FULL_DEV;
+
 	volume_unlock(ctx);
 
 	if (ctx->tc_flags & VCF_FULL_DEV) {

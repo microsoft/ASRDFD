@@ -243,6 +243,8 @@ typedef struct _driver_context {
 	inm_u32_t default_data_pool_size_mb;
 	/* Total unreserved pages for the driver context */
 	inm_u32_t dc_cur_unres_pages;
+	/* Mark if data pool allocation is complete */
+	int dc_pool_allocation_completed;
 	/* Total reserved pages for target contexts */
 	inm_u32_t dc_cur_res_pages;
 	/* Page reservations for new volume context based on tunable*/
@@ -299,8 +301,8 @@ typedef struct _driver_context {
 	struct drv_ctx_bmap_info    dc_bmap_info;
 
 	/* lock to protect a_ops list */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
-    inm_spinlock_t dc_inmaops_lock;		/* lock to protect a_ops list */
+#ifdef INM_QUEUE_RQ_ENABLED
+	inm_spinlock_t dc_inmaops_lock;		/* lock to protect a_ops list */
 #else 	
 	inm_rwsem_t dc_inmaops_sem;
 #endif	
@@ -375,7 +377,7 @@ typedef struct _driver_context {
 	inm_u16_t       dc_wokeup_tag_drain_notify_thread;
 	char            *dc_tag_drain_notify_guid;
 	inm_u32_t       dc_tag_commit_notify_flag;
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	inm_completion_t dc_alloc_thread_started;
 	inm_wait_queue_head_t dc_alloc_thread_waitq;
 	inm_completion_t dc_alloc_thread_exit;

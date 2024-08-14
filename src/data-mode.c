@@ -415,6 +415,8 @@ inm_tc_resv_del(target_context_t *tgt_ctxt, inm_u32_t num_pages)
 inm_s32_t init_data_flt_ctxt(data_flt_t *data_ctxt)
 {
 	inm_u32_t num_pages = 0;
+	inm_u32_t num_pages_req = 0;
+	inm_u32_t nr_pages = 0;
 #ifndef INM_AIX
 	inm_u32_t gfp_mask = INM_KM_SLEEP|INM_KM_NORETRY;
 #else
@@ -440,32 +442,46 @@ inm_s32_t init_data_flt_ctxt(data_flt_t *data_ctxt)
 	gfp_mask |= INM_KM_HIGHMEM;
 #endif
 
+	if (!driver_ctx->tunable_params.enable_data_filtering)
+		return 0;
+
+	// Fail driver load if 64MB can't be allocated
 	num_pages = DEFAULT_DATA_POOL_SIZE_MB;
 	num_pages <<= (MEGABYTE_BIT_SHIFT - INM_PAGESHIFT);
-	if(driver_ctx->tunable_params.enable_data_filtering) {
-		if(!alloc_data_pages(&data_ctxt->data_pages_head,
-					 num_pages,
-					 &data_ctxt->pages_allocated, gfp_mask)) {
-			if(data_ctxt->pages_allocated) {
-				free_data_pages(&data_ctxt->data_pages_head);
-				data_ctxt->pages_allocated = 0;
-			}
-			
-			err("Not enough data pages available for filtering");
+	if(!alloc_data_pages(&data_ctxt->data_pages_head,
+		num_pages, &data_ctxt->pages_allocated, gfp_mask)) {
+		if(data_ctxt->pages_allocated) {
+			free_data_pages(&data_ctxt->data_pages_head);
+			data_ctxt->pages_allocated = 0;
+		}
+		err("Not enough data pages available for filtering");
 			return -ENOMEM;
-		}	
-		data_ctxt->pages_free = data_ctxt->pages_allocated;
-		driver_ctx->dc_cur_unres_pages = data_ctxt->pages_allocated;
-		driver_ctx->data_flt_ctx.dp_pages_alloc_free = data_ctxt->pages_allocated;
-		INM_BUG_ON(!driver_ctx->tunable_params.percent_change_data_pool_size);
-		data_ctxt->dp_nrpgs_slab = (total_ram_pgs *
-			driver_ctx->tunable_params.percent_change_data_pool_size) / 100;
-		data_ctxt->dp_least_free_pgs = driver_ctx->dc_cur_unres_pages;
-		INM_BUG_ON(driver_ctx->dc_cur_unres_pages > 
-			(driver_ctx->data_flt_ctx.pages_allocated -
-			 driver_ctx->dc_cur_res_pages));
-		recalc_data_file_mode_thres();	
 	}
+	// Try to allocate 6.25% of total memory
+	num_pages_req = driver_ctx->tunable_params.data_pool_size;
+	num_pages_req <<= (MEGABYTE_BIT_SHIFT - INM_PAGESHIFT);
+	if (num_pages_req <= num_pages)
+		goto init_dc_pages;
+	// Do not fail driver load if memory allocation fails here
+	if (alloc_data_pages(&data_ctxt->data_pages_head,
+		num_pages_req - num_pages,
+		&nr_pages, gfp_mask))
+		driver_ctx->dc_pool_allocation_completed = 1;
+	if(nr_pages)
+		data_ctxt->pages_allocated += nr_pages;
+
+init_dc_pages:
+	data_ctxt->pages_free = data_ctxt->pages_allocated;
+	driver_ctx->dc_cur_unres_pages = data_ctxt->pages_allocated;
+	driver_ctx->data_flt_ctx.dp_pages_alloc_free = data_ctxt->pages_allocated;
+	INM_BUG_ON(!driver_ctx->tunable_params.percent_change_data_pool_size);
+	data_ctxt->dp_nrpgs_slab = (total_ram_pgs *
+		driver_ctx->tunable_params.percent_change_data_pool_size) / 100;
+	data_ctxt->dp_least_free_pgs = driver_ctx->dc_cur_unres_pages;
+	INM_BUG_ON(driver_ctx->dc_cur_unres_pages >
+		(driver_ctx->data_flt_ctx.pages_allocated -
+		driver_ctx->dc_cur_res_pages));
+	recalc_data_file_mode_thres();
 
 	return 0;
 }
@@ -504,8 +520,7 @@ add_data_pages(inm_u32_t num_pages)
 
 	alloc_data_pages(&pg_head, num_pages, &pgs_alloced, gfp_mask);
 
-	if (pgs_alloced != num_pages) {
-		free_data_pages(&pg_head);
+	if (pgs_alloced == 0) {
 		return 1;
 	}
 
@@ -520,6 +535,10 @@ add_data_pages(inm_u32_t num_pages)
 	driver_ctx->data_flt_ctx.dp_pages_alloc_free += pgs_alloced;
 	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->data_flt_ctx.data_pages_lock,
 						   lock_flag);
+	if (pgs_alloced != num_pages) {
+		return 1;
+	}
+
 	INM_BUG_ON(driver_ctx->dc_cur_unres_pages > 
 		(driver_ctx->data_flt_ctx.pages_allocated -
 		 driver_ctx->dc_cur_res_pages));
@@ -795,7 +814,7 @@ inm_split_change_in_data_mode(target_context_t *tgt_ctxt,
 	num_pages = 0;
 	total_num_pages = 0;
 
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	if ((INM_ATOMIC_READ(&driver_ctx->is_iobarrier_on)) ) {
 		is_barrier_on = 1;
 		if(!(tgt_ctxt->tc_flags & VCF_IO_BARRIER_ON)) {
@@ -923,7 +942,7 @@ add_change_node_to_list:
    	/*
 	 * Append the split IO change nodes in to target head list of change nodes
 	 */
-#if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8)
+#ifdef INM_QUEUE_RQ_ENABLED
 	if (is_barrier_on) {
 		inm_list_splice_at_tail(&split_chg_node_list,
 			&chg_node->vcptr->tc_non_drainable_node_head);
