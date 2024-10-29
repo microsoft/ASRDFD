@@ -69,6 +69,8 @@
 #define SLES15SP4
 #elif (PATCH_LEVEL == 5)
 #define SLES15SP5
+#elif (PATCH_LEVEL == 6)
+#define SLES15SP6
 #endif
 #endif
 

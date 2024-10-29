@@ -72,7 +72,7 @@ endif
 
 ifeq ($(findstring ubuntu, $(VENDOR)), ubuntu)
 	DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
-			grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
+		    	grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
 			cut -d"." -f 1)
 	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
 endif

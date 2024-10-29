@@ -241,14 +241,16 @@ inm_s32_t is_rootfs_ro(void);
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
 inm_block_device_t *open_by_dev_path(char *, int);
 inm_block_device_t *open_by_dev_path_v2(char *, int);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+#define close_bdev(bdevp, mode) ({				\
+struct bdev_handle *handle = container_of(&bdevp, struct bdev_handle, bdev);	\
+bdev_release(handle); })
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
-#else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
 #define close_bdev(bdev, mode)  blkdev_put(bdev, mode);
 #else 
 #define close_bdev(bdev, mode)  blkdev_put(bdev);
-#endif
 #endif
 inm_s32_t flt_release(struct inode *inode, struct file *filp);
 inm_s32_t iobuffer_sync_read_physical(struct _iobuffer_tag *iob, inm_s32_t force);
@@ -925,7 +927,10 @@ typedef struct {
 })
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+#define inm_freeze_bdev(__bdev, __sb)   bdev_freeze(__bdev)
+#define inm_thaw_bdev(__bdev, __sb)     bdev_thaw(__bdev)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
 #define inm_freeze_bdev(__bdev, __sb)   freeze_bdev(__bdev)
 #define inm_thaw_bdev(__bdev, __sb)     thaw_bdev(__bdev)
 #else
