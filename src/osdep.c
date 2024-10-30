@@ -63,7 +63,7 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0) || defined SLES12 || \
 		defined SLES15
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,10,0) || defined SLES12 || \
-		defined SLES15
+		defined SLES15 && !defined(SLES15SP6)
 #include <linux/slab_def.h>
 #endif
 #endif
@@ -72,7 +72,7 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -207,21 +207,21 @@ is_rootfs_ro(void)
 		bdevp = inm_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 		if (!IS_ERR(bdevp)) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
-			inm_super_block_t *sbp = bdevp->bd_super;
+			if (bdev_read_only(bdevp)) {
+				dbg("root is read only file system \n");
+				retval = 1;
+			}
 #else
 			inm_super_block_t *sbp = get_super(bdevp);
-#endif
-
 			if (sbp) {
 #define INM_FS_RDONLY 1
 				if (sbp->s_flags & INM_FS_RDONLY) {
 					dbg("root is read only file system \n");
 					retval = 1;
 				}
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
 				drop_super(sbp);
-#endif
 			}
+#endif			
 			close_bdev(bdevp, FMODE_READ);
 		}
 	return retval;
@@ -946,7 +946,7 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -958,7 +958,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(SLES15SP6)
 	 struct gendisk *disk = NULL;
 #endif
 	 struct scsi_device *sdp = NULL;
@@ -968,7 +968,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 		 goto out;
 	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
@@ -976,7 +976,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(SLES15SP6)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
@@ -1439,7 +1439,11 @@ print_AT_stat(target_context_t *tcp, char *page, inm_s32_t *len)
 struct block_device *
 inm_open_by_devnum(dev_t dev, unsigned mode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,7,0)
+	struct bdev_handle *handle;
+	handle = bdev_open_by_dev(dev, mode, NULL, NULL);
+	return handle->bdev;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
 	return blkdev_get_by_dev(dev, mode, NULL, NULL);
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
 	return blkdev_get_by_dev(dev, mode, NULL);
@@ -2821,6 +2825,18 @@ barrier_all_timeout(wqentry_t *not_used)
 	return;
 }
 
+/*
+ * revoke_tags_timeout
+ *
+ * Revoke tags on timeout
+ */
+void
+revoke_tags_timeout(wqentry_t *not_used)
+{
+	err("Starting revoke tags timeout procedure at %lu", jiffies);
+	commit_tags_v2(driver_ctx->dc_cp_guid, TAG_REVOKE, 1);
+	return;
+}
 
 /*
  * process ioctl to:
@@ -3117,10 +3133,16 @@ remove_io_barrier:
 	dbg("removed io barrier");
 
 	if (tag_commit_required) {
-		memcpy_s(&driver_ctx->dc_cp_guid,
-				sizeof(driver_ctx->dc_cp_guid),
-				tag_vol->tag_guid, sizeof(tag_vol->tag_guid));
-		start_cp_timer(tag_vol->timeout, barrier_all_timeout);
+        /*
+         * starting timer only if crash tag is succesfully inserted
+         * for any disk where drain barrier is set
+         */
+		if (driver_ctx->dc_cp == INM_CP_TAG_COMMIT_PENDING) {
+			memcpy_s(&driver_ctx->dc_cp_guid,
+					sizeof(driver_ctx->dc_cp_guid),
+					tag_vol->tag_guid, sizeof(tag_vol->tag_guid));
+			start_cp_timer(tag_vol->timeout, revoke_tags_timeout);
+		}
 	}
 	else if (!tag_all_volumes) {
 		info("No volumes passed with drain barrier flag set");
@@ -3576,7 +3598,10 @@ inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 inm_s32_t
 inm_blkdev_get(inm_bio_dev_t *bdev)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
+	return (IS_ERR(bdev_open_by_dev(bdev->bd_dev,
+			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
 			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
