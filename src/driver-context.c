@@ -226,6 +226,7 @@ inm_s32_t init_driver_context(void)
 	 /* Consistency Point */
 	INM_ATOMIC_SET(&driver_ctx->is_iobarrier_on, 0);
 	INM_INIT_LIST_HEAD(&driver_ctx->freeze_vol_list);
+	INM_INIT_SEM(&driver_ctx->dc_freezevol_mutex);
 	driver_ctx->dc_cp = INM_CP_NONE;
 	INM_MEM_ZERO(driver_ctx->dc_cp_guid, 
 				 sizeof(driver_ctx->dc_cp_guid));
@@ -365,6 +366,7 @@ void free_driver_context(void)
 	INM_RW_SEM_DESTROY(&driver_ctx->dc_inmaops_sem);
 #endif
 	INM_DESTROY_SEM(&driver_ctx->tag_sem);
+	INM_DESTROY_SEM(&driver_ctx->dc_freezevol_mutex);
 	INM_DESTROY_SPIN_LOCK(&driver_ctx->time_stamp_lock);
 	INM_DESTROY_SPIN_LOCK(&driver_ctx->dc_host_info.rq_list_lock);
 	INM_DESTROY_SPIN_LOCK(&driver_ctx->page_pool_lock);

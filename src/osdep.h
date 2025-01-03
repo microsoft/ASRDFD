@@ -83,6 +83,12 @@
 #include <linux/sched/signal.h>
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+#ifndef INM_HANDLE_FOR_BDEV_ENABLED
+#define INM_HANDLE_FOR_BDEV_ENABLED
+#endif
+#endif
+
 #if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8) || \
 	(defined(UBUNTU1804) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)) || defined(UBUNTU2004) || \
 	defined(OL7UEK6)
@@ -127,6 +133,9 @@ struct _tag_info;
 struct _vol_info
 {
 	struct inm_list_head next;
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+	struct bdev_handle* handle;
+#endif	
 	inm_block_device_t  *bdev;
 	inm_super_block_t *sb;
 };
@@ -210,6 +219,9 @@ typedef struct freeze_vol_info
 {
 	struct inm_list_head freeze_list_entry;
 	char                 vol_name[TAG_VOLUME_MAX_LENGTH];
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+	struct bdev_handle* handle;
+#endif
 	inm_block_device_t   *bdev;
 	inm_super_block_t    *sb;
 } freeze_vol_info_t;
@@ -239,12 +251,17 @@ void unlock_volumes(int, tag_volinfo_t *);
 inm_s32_t is_rootfs_ro(void);
 
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+struct bdev_handle *inm_bdevhandle_open_by_dev_path(char *, int);
+struct bdev_handle *inm_bdevhandle_open_by_devnum(dev_t, unsigned);
+#else
 inm_block_device_t *open_by_dev_path(char *, int);
 inm_block_device_t *open_by_dev_path_v2(char *, int);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
-#define close_bdev(bdevp, mode) ({				\
-struct bdev_handle *handle = container_of(&bdevp, struct bdev_handle, bdev);	\
-bdev_release(handle); })
+struct block_device *inm_open_by_devnum(dev_t, unsigned);
+#endif
+
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#define close_bdev_handle(handle)    bdev_release(handle);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
@@ -813,8 +830,6 @@ int _inm_xm_mapin(struct _target_context *, void *, char **);
 #define IS_ALIGNED(x, y)    (!(x & (y - 1)))
 
 #endif
-
-struct block_device *inm_open_by_devnum(dev_t, unsigned);
 
 #define INM_SET_HDEV_MXS(hdcp, val)
 #define INM_GET_HDEV_MXS(hdc_dev)  0
