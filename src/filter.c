@@ -125,6 +125,7 @@ do_volume_stacking(inm_dev_extinfo_t *dev_info)
 	host_dev_ctx_t *hdcp = NULL;
 	mirror_vol_entry_t *vol_entry = NULL;
 	inm_s32_t err = -1;
+	dev_t dev = 0;
 
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		info("do_volume_stacking: entered");
@@ -143,6 +144,7 @@ do_volume_stacking(inm_dev_extinfo_t *dev_info)
 	   return err;
 	}
 
+	convert_path_to_dev(dev_info->d_guid, &dev);
 retry:
 	INM_DOWN_WRITE(&(driver_ctx->tgt_list_sem));
 
@@ -152,7 +154,7 @@ retry:
 	switch(dev_info->d_type) {
 		case FILTER_DEV_HOST_VOLUME:
 		case FILTER_DEV_FABRIC_LUN:
-			tgt_ctx = get_tgt_ctxt_from_uuid_locked(dev_info->d_guid);
+			tgt_ctx = get_tgt_ctxt_from_uuid_locked(dev_info->d_guid, &dev);
 			/* Another disk with same persistent name is not protected */
 			if (!tgt_ctx) {
 				tgt_ctx = get_tgt_ctxt_from_name_nowait_locked(dev_info->d_pname);
@@ -444,16 +446,12 @@ do_start_filtering(inm_devhandle_t *idhp, inm_dev_extinfo_t *dev_infop)
 		break;
 		case FILTER_DEV_FABRIC_LUN:
 #ifdef INM_LINUX
-			src_dev = NULL;
-			src_dev = open_by_dev_path(dev_infop->d_guid, 0);
-			if (src_dev) {
-				close_bdev(src_dev, FMODE_READ);
-				r = INM_EINVAL;
-				err("Device:%s incorrectly sent as source device for AT LUN",
-					dev_infop->d_guid);
-			}
+		INM_BUG_ON(1);
+		r = INM_EINVAL;
+		err("Device:%s incorrectly sent as source device for AT LUN",
+			dev_infop->d_guid);
 #else
-			INM_BUG_ON(1);
+		INM_BUG_ON(1);
 #endif
 		break;
 

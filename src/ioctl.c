@@ -171,7 +171,7 @@ inm_calc_len_required( struct inm_list_head *ptr)
 			continue;
 		}
 		len += strlen(tgt_ctxt->tc_guid) + 1;
-			
+
 	}
 	return (len);
 }
@@ -199,7 +199,7 @@ inm_s32_t process_start_notify_ioctl(inm_devhandle_t *idhp,
 
 	get_time_stamp(&(driver_ctx->dc_tel.dt_s2_start_time));
 	telemetry_clear_dbs(&driver_ctx->dc_tel.dt_blend, DBS_S2_STOPPED);
-	
+
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		dbg("leaving");
 	}
@@ -236,7 +236,7 @@ inm_s32_t process_shutdown_notify_ioctl(inm_devhandle_t  *idhp,
 	INM_ATOMIC_INC(&driver_ctx->service_thread.wakeup_event_raised);
 	INM_WAKEUP_INTERRUPTIBLE(&driver_ctx->service_thread.wakeup_event);
 	INM_COMPLETE(&driver_ctx->service_thread._new_event_completion);
-	
+
 	get_time_stamp(&(driver_ctx->dc_tel.dt_svagent_start_time));
 	telemetry_clear_dbs(&driver_ctx->dc_tel.dt_blend, DBS_SERVICE_STOPPED);
 
@@ -284,7 +284,7 @@ inm_s32_t process_volume_stacking_ioctl(inm_devhandle_t *idhp,
 		err = INM_EFAULT;
 		goto out;
 	}
-	
+
 	dev_infop->d_guid[GUID_SIZE_IN_CHARS-1] = '\0';
 	dev_infop->d_pname[GUID_SIZE_IN_CHARS-1] = '\0';
 	dev_infop->d_mnt_pt[INM_PATH_MAX-1] = '\0';
@@ -314,7 +314,7 @@ inm_s32_t process_volume_stacking_ioctl(inm_devhandle_t *idhp,
 			err = -EINVAL;
 			goto out;
 	}
-	
+
 	if (driver_state & DRV_LOADED_FULLY) {
 		if (is_flt_disabled(dev_infop->d_pname)) {
 			info("Filtering not enabled for %s", 
@@ -353,14 +353,14 @@ inm_s32_t process_volume_stacking_ioctl(inm_devhandle_t *idhp,
 		put_tgt_ctxt(tgt_ctxt);
 	}
 
-out:    
+out:
 	if (err)
 		err("Stacking failed for %s (%s) - %d", dev_infop->d_guid, 
 			dev_infop->d_pname, err);
 
 	if (dev_infop)
 		INM_KFREE(dev_infop, sizeof(*dev_infop), INM_KERNEL_HEAP);
-	
+
 	idhp->private_data = NULL;
 
 	dbg("leaving");
@@ -377,7 +377,7 @@ inm_s32_t process_start_filtering_ioctl(inm_devhandle_t *idhp,
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		info("entered");
 	}
-   
+
 	if(!INM_ACCESS_OK(VERIFY_READ, (void __INM_USER *)arg, 
 						sizeof(inm_dev_info_t))) {
 		err("Read access violation for inm_dev_info_t");
@@ -398,7 +398,7 @@ inm_s32_t process_start_filtering_ioctl(inm_devhandle_t *idhp,
 		INM_KFREE(dev_infop, sizeof(inm_dev_info_t), INM_KERNEL_HEAP);
 		return INM_EFAULT;
 	}
-	
+
 	dev_infop->d_guid[GUID_SIZE_IN_CHARS-1] = '\0';
 	dev_infop->d_pname[GUID_SIZE_IN_CHARS-1] = '\0';
 
@@ -432,7 +432,7 @@ process_start_mirroring_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_MIRROR))){
 		info("entered");
 	}
-   
+
 	if(!INM_ACCESS_OK(VERIFY_READ, (void __INM_USER *)arg, 
 					sizeof(mirror_conf_info_t))) {
 		err("Read access violation for mirror_conf_info_t");
@@ -502,7 +502,7 @@ process_mirror_volume_stacking_ioctl(inm_devhandle_t *idhp,
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_MIRROR))){
 		info("entered");
 	}
-   
+
 	if(!INM_ACCESS_OK(VERIFY_READ, (void __INM_USER *)arg, 
 					sizeof(mirror_conf_info_t))) {
 		err("Read access violation for mirror_conf_info_t");
@@ -625,19 +625,19 @@ process_mirror_volume_stacking_ioctl(inm_devhandle_t *idhp,
 	dev_infop->src_list = &src_mirror_list_head;
 	dev_infop->dst_list = &dst_mirror_list_head;
 	dev_infop->d_startoff = mirror_infop->startoff;
-	
+
 	if (mirror_infop->d_type == FILTER_DEV_MIRROR_SETUP) {
 		err = do_volume_stacking(dev_infop);
 		mirror_infop->d_status = MIRROR_STACKING_ERR;
 	}
 
-	
+
 out:
 	if (INM_COPYOUT(arg, mirror_infop, sizeof(mirror_conf_info_t))) {
 		err("INM_COPYOUT failed");
 		err = INM_EFAULT;
 	}
-	
+
 	if (mirror_infop) {
 		INM_KFREE(mirror_infop, sizeof(*mirror_infop), 
 						INM_KERNEL_HEAP);
@@ -691,12 +691,14 @@ inm_s32_t
 stop_filtering_volume(char *uuid, inm_devhandle_t *idhp, int dbs_flag)
 {
 	target_context_t *tgt_ctxt = NULL;
+	dev_t dev = 0;
 #ifdef INM_AIX
 	int flag;
 #endif
 
+	convert_path_to_dev(uuid, &dev);
 	INM_DOWN_WRITE(&driver_ctx->tgt_list_sem);
-	tgt_ctxt = get_tgt_ctxt_from_uuid_locked(uuid);
+	tgt_ctxt = get_tgt_ctxt_from_uuid_locked(uuid, &dev);
 	if(!tgt_ctxt) {
 		INM_UP_WRITE(&driver_ctx->tgt_list_sem);
 		dbg("Failed to get target context from uuid");
@@ -921,6 +923,7 @@ inm_s32_t process_volume_unstacking_ioctl(inm_devhandle_t *idhp,
 {
 	target_context_t *tgt_ctxt = NULL;
 	VOLUME_GUID *guid = NULL;
+	dev_t dev = 0;
 #ifdef INM_AIX
 	int flag;
 #endif
@@ -948,8 +951,10 @@ inm_s32_t process_volume_unstacking_ioctl(inm_devhandle_t *idhp,
 
 	guid->volume_guid[GUID_SIZE_IN_CHARS-1] = '\0';
 
+	convert_path_to_dev((char *)&guid->volume_guid[0], &dev);
 	INM_DOWN_WRITE(&driver_ctx->tgt_list_sem);
-	tgt_ctxt = get_tgt_ctxt_from_uuid_locked((char *)&guid->volume_guid[0]);
+	tgt_ctxt = get_tgt_ctxt_from_uuid_locked(
+		(char *)&guid->volume_guid[0], &dev);
 	if(!tgt_ctxt) {
 		INM_UP_WRITE(&driver_ctx->tgt_list_sem);
 		dbg("Failed to get target context from uuid");
@@ -1005,7 +1010,7 @@ inm_s32_t process_get_db_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 {
 	target_context_t *ctxt = (target_context_t *)idhp->private_data;
 	UDIRTY_BLOCK_V2 *user_db = NULL; 
-	inm_s32_t status = 0;                 
+	inm_s32_t status = 0;
 
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		dbg("entered");
@@ -1013,7 +1018,7 @@ inm_s32_t process_get_db_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 	if(!ctxt) {
 		err("Get_Db_trans ioctl called as file private is NULL");
-		return -EINVAL;    
+		return -EINVAL;
 	}
 
 	if(is_target_filtering_disabled(ctxt)) {
@@ -1217,7 +1222,7 @@ inm_s32_t process_set_volume_flags_ioctl(inm_devhandle_t *idhp,
 					   INM_KM_SLEEP, INM_KERNEL_HEAP);
 	if(!flagip)
 		return -ENOMEM;
-	
+
 	if(INM_COPYIN(flagip, arg, sizeof(VOLUME_FLAGS_INPUT))) {
 		INM_KFREE(flagip, sizeof(VOLUME_FLAGS_INPUT), INM_KERNEL_HEAP);
 		return -EFAULT;
@@ -1262,7 +1267,7 @@ inm_s32_t process_get_volume_flags_ioctl(inm_devhandle_t *idhp,
 {
 	target_context_t *ctxt;
 	VOLUME_FLAGS_INPUT *flagip;
-	
+
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		dbg("entered");
 	}
@@ -1297,7 +1302,7 @@ inm_s32_t process_get_volume_flags_ioctl(inm_devhandle_t *idhp,
 	put_tgt_ctxt(ctxt);
 
 	INM_KFREE(flagip, sizeof(VOLUME_FLAGS_INPUT), INM_KERNEL_HEAP);
-	
+
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		dbg("leaving");
 	}
@@ -1313,14 +1318,14 @@ wait_for_db(target_context_t *ctxt, inm_s32_t timeout)
 	inm_s32_t need_to_wait = 1;
 
 	volume_lock(ctxt);
-	
+
 	if(!should_wait_for_db(ctxt))
 		need_to_wait = 0;
 	else 
 		GET_TIME_STAMP_IN_USEC(ctxt->tc_dbwait_event_ts_in_usec);
-	
+
 	volume_unlock(ctxt);
-	
+
 	if(need_to_wait) {
 		inm_wait_event_interruptible_timeout(ctxt->tc_waitq, 
 			 should_wakeup_s2(ctxt), (timeout * INM_HZ));
@@ -1374,7 +1379,7 @@ inm_s32_t process_wait_for_db_ioctl(inm_devhandle_t *idhp,
 
 	timeout_err = wait_for_db(ctxt, notify->Seconds);
 
-	get_time_stamp(&(ctxt->tc_s2_latency_base_ts));    
+	get_time_stamp(&(ctxt->tc_s2_latency_base_ts));
 	INM_KFREE(notify, sizeof(WAIT_FOR_DB_NOTIFY), INM_KERNEL_HEAP);
 	put_tgt_ctxt(ctxt);
 
@@ -1392,14 +1397,14 @@ inm_s32_t process_wait_for_db_v2_ioctl(inm_devhandle_t *idhp,
 		error = -EFAULT;
 		goto err;
 	}
-	
+
 	notify = INM_KMALLOC(sizeof(WAIT_FOR_DB_NOTIFY), INM_KM_SLEEP, 
 						 INM_KERNEL_HEAP);
 	if (!notify) {
 		error = -ENOMEM;
 		goto err;
 	}
-		
+
 	if (INM_COPYIN(notify, arg, sizeof(WAIT_FOR_DB_NOTIFY))) {
 		error = -EFAULT;
 		goto err;
@@ -1410,10 +1415,10 @@ inm_s32_t process_wait_for_db_v2_ioctl(inm_devhandle_t *idhp,
 	ctxt = (target_context_t *)idhp->private_data;
 	if(!ctxt) {
 		err("Wait_DB_V2 ioctl called without file private");
-		error = -EINVAL;    
+		error = -EINVAL;
 		goto err;
 	}
-	
+
 	get_tgt_ctxt(ctxt);
 
 	if(is_target_filtering_disabled(ctxt)) {
@@ -1421,10 +1426,10 @@ inm_s32_t process_wait_for_db_v2_ioctl(inm_devhandle_t *idhp,
 		error = INM_EBUSY;
 		goto err;
 	}
-		
+
 	if (strcmp(ctxt->tc_guid, notify->VolumeGUID)) {
 		err("Wait_DB_V2 ioctl called without file private");
-		error = -EINVAL;    
+		error = -EINVAL;
 		goto err;
 	}
 
@@ -1573,7 +1578,7 @@ retry:
 
 	inm_flush_ts_and_seqno_to_file(TRUE);
 	inm_close_ts_and_seqno_file();
-  
+
 	/*
 	* If root device is not found, mark it for resync
 	*/ 
@@ -1689,7 +1694,7 @@ out:
 inm_s32_t process_tag_ioctl(inm_devhandle_t *idhp, void __INM_USER *user_buf, 
 							inm_s32_t sync_tag)
 {
-	inm_s32_t flags = 0;	
+	inm_s32_t flags = 0;
 	inm_u16_t num_vols = 0, i;
 	inm_s32_t error = 0;
 	tag_guid_t *tag_guid = NULL;
@@ -1991,7 +1996,7 @@ inm_s32_t process_get_db_threshold(inm_devhandle_t *idhp,
 {
 	get_db_thres_t *thr;
 	target_context_t *ctxt;
-	
+
 	if(!INM_ACCESS_OK(VERIFY_READ | VERIFY_WRITE, 
 			(void __INM_USER *)user_buf,
 			sizeof(get_db_thres_t))) {
@@ -2031,7 +2036,7 @@ inm_s32_t process_get_db_threshold(inm_devhandle_t *idhp,
 
 	INM_KFREE(thr, sizeof(get_db_thres_t), INM_KERNEL_HEAP);
 
-	return 0;	
+	return 0;
 }
 
 inm_s32_t process_resync_start_ioctl(inm_devhandle_t *idhp, 
@@ -2069,15 +2074,15 @@ inm_s32_t process_resync_start_ioctl(inm_devhandle_t *idhp,
 		return -EINVAL;
 	}
 
-	volume_lock(ctxt);    
-	
+	volume_lock(ctxt);
+
 	if (ctxt->tc_cur_node && ctxt->tc_optimize_performance &
 		PERF_OPT_DRAIN_PREF_DATA_MODE_CHANGES_IN_NWO) {
 		INM_BUG_ON(!inm_list_empty(&ctxt->tc_cur_node->nwo_dmode_next));
 		if (ctxt->tc_cur_node->type == NODE_SRC_DATA &&
 			ctxt->tc_cur_node->wostate != ecWriteOrderStateData) {
 			close_change_node(ctxt->tc_cur_node, IN_IOCTL_PATH);
-			inm_list_add_tail(&ctxt->tc_cur_node->nwo_dmode_next,   
+			inm_list_add_tail(&ctxt->tc_cur_node->nwo_dmode_next,
 							  &ctxt->tc_nwo_dmode_list);
 			if (ctxt->tc_optimize_performance & PERF_OPT_DEBUG_DATA_DRAIN) {
 				info("Appending chg:%p to ctxt:%p next:%p prev:%p mode:%d",
@@ -2096,7 +2101,7 @@ inm_s32_t process_resync_start_ioctl(inm_devhandle_t *idhp,
 
 	resync_start->TimeInHundNanoSecondsFromJan1601 = ts.TimeInHundNanoSecondsFromJan1601;
 	resync_start->ullSequenceNumber = ts.ullSequenceNumber;
-	
+
 	ctxt->tc_tel.tt_resync_start = ts.TimeInHundNanoSecondsFromJan1601;
 
 	volume_unlock(ctxt);
@@ -2108,12 +2113,12 @@ inm_s32_t process_resync_start_ioctl(inm_devhandle_t *idhp,
 							INM_KERNEL_HEAP);
 		return -EFAULT;
 	}
-	
+
 	put_tgt_ctxt(ctxt);
 
 	INM_KFREE(resync_start, sizeof(RESYNC_START_V2), INM_KERNEL_HEAP);
 
-	return 0;	
+	return 0;
 }
 
 inm_s32_t process_resync_end_ioctl(inm_devhandle_t *idhp, 
@@ -2157,7 +2162,7 @@ inm_s32_t process_resync_end_ioctl(inm_devhandle_t *idhp,
 		if (ctxt->tc_cur_node->type == NODE_SRC_DATA &&
 			ctxt->tc_cur_node->wostate != ecWriteOrderStateData) {
 			close_change_node(ctxt->tc_cur_node, IN_IOCTL_PATH);
-			inm_list_add_tail(&ctxt->tc_cur_node->nwo_dmode_next,   
+			inm_list_add_tail(&ctxt->tc_cur_node->nwo_dmode_next,
 						  &ctxt->tc_nwo_dmode_list);
 			if (ctxt->tc_optimize_performance & PERF_OPT_DEBUG_DATA_DRAIN) {
 				info("Appending chg:%p to ctxt:%p next:%p prev:%p mode:%d",
@@ -2289,7 +2294,7 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	if (!page){
 		ret = -ENOMEM;
 		goto out;
-	}    
+	}
 
 	len += snprintf(page+len, (INM_PAGESZ - len), "\n");
 
@@ -2314,7 +2319,7 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"No of protected volumes    : %d\n", 
 		driver_ctx->total_prot_volumes);
-	
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"DRIVER BUILD TIME           : %s (%s)\n", BLD_DATE, BLD_TIME);
 
@@ -2352,7 +2357,7 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 		mb_allocated, driver_ctx->data_flt_ctx.pages_allocated,
 		driver_ctx->tunable_params.data_pool_size);
 
-	if (mb_free){ 	
+	if (mb_free){ 
 		len += snprintf(page+len, (INM_PAGESZ - len),
 			"Data Pool Size Free         : %llu MB(%u pages) \n", 
 			mb_free, driver_ctx->data_flt_ctx.pages_free);
@@ -2388,8 +2393,8 @@ process_get_global_stats_ioctl(inm_devhandle_t *handle, void * arg)
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Data File Mode Enabled      : %s \n",
 		(driver_ctx->tunable_params.enable_data_file_mode ?
-			 "Yes" : "No"));	
-	
+			 "Yes" : "No"));
+
 	len += snprintf(page+len, (INM_PAGESZ - len),
 		"Free Pages Threshold        : %d \n\n", 
 		driver_ctx->tunable_params.free_pages_thres_for_filewrite);
@@ -3261,7 +3266,7 @@ process_get_volume_stats_v2_ioctl(inm_devhandle_t *handle, void * arg)
 		goto out;
 	}
 
-out:    
+out:
 	if (tgt_ctxt) {
 		put_tgt_ctxt(tgt_ctxt);
 	}
@@ -3328,7 +3333,7 @@ process_get_protected_volume_list_ioctl(inm_devhandle_t *handle, void * arg)
 		if (vol_list->buf_len < (len + unit_guid_len)) {
 			err("insufficient mem allocated by user");
 			ret = INM_EAGAIN;
-			len += inm_calc_len_required(ptr);	
+			len += inm_calc_len_required(ptr);
 			break;
 		}
 		if (INM_COPYOUT(vol_list->bufp + len, lbufp,
@@ -3680,7 +3685,7 @@ process_get_additional_volume_stats(inm_devhandle_t *handle, void *arg)
 
 		INM_DOWN(&bapi->sem);
 		vsa_infop->ullTotalChangesPending +=
-			bitmap_api_get_dat_bytes_in_bitmap(bapi, NULL);	
+			bitmap_api_get_dat_bytes_in_bitmap(bapi, NULL);
 		INM_UP(&bapi->sem);
 	}
 	put_tgt_ctxt(ctxt);
@@ -3814,7 +3819,7 @@ process_bitmap_stats_ioctl(inm_devhandle_t *handle, void *arg)
 			vbstatsp->nr_dbs = (inm_u32_t)bbsp->bbs_nr_dbs;
 			vbstatsp->bmap_gran = bbsp->bbs_bmap_gran;
 		}
-	}	
+	}
 
 	info("Volume Name : %s \n", vbstatsp->VolumeGuid.volume_guid);
 	info("bitmap gran : %lld \n", bbsp->bbs_bmap_gran);
@@ -3969,7 +3974,7 @@ process_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 	arg = tag_vol->vol_info;
 	tag_vol->vol_info = NULL;
-	
+
 	INM_DOWN(&driver_ctx->dc_cp_mutex);
 
 	if (driver_ctx->dc_cp != INM_CP_NONE) {  /* Active CP */
@@ -4052,7 +4057,7 @@ process_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	}
 
 	for(numvol = 0; numvol < tag_vol->nr_vols; numvol++) {
-		
+
 		/* mem set the buffer before using it */
 		INM_MEM_ZERO(tag_vol->vol_info, sizeof(volume_info_t));
 
@@ -4177,6 +4182,9 @@ process_get_blk_mq_status_ioctl(inm_devhandle_t *handle, void *arg)
 	inm_block_device_t *bdev = NULL;
 	struct request_queue *q = NULL;
 	BLK_MQ_STATUS *blk_mq_status = NULL;
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+	struct bdev_handle *bdev_handle = NULL;
+#endif
 
 	if (!INM_ACCESS_OK(VERIFY_READ | VERIFY_WRITE, (void __user*)arg,
 					   sizeof(BLK_MQ_STATUS))) {
@@ -4206,8 +4214,17 @@ process_get_blk_mq_status_ioctl(inm_devhandle_t *handle, void *arg)
 
 	dbg("Device path: %s", blk_mq_status->VolumeGuid.volume_guid);
 
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+	bdev_handle = inm_bdevhandle_open_by_dev_path(blk_mq_status->VolumeGuid.volume_guid,
+			FMODE_READ);
+	if (bdev_handle) {
+		bdev = bdev_handle->bdev;
+	}
+	else {
+#else
 	bdev = open_by_dev_path(blk_mq_status->VolumeGuid.volume_guid, 0); 
 	if (!bdev) {
+#endif
 		dbg("Failed to convert dev path (%s) to bdev", 
 			blk_mq_status->VolumeGuid.volume_guid);
 		ret = -ENODEV;
@@ -4225,8 +4242,13 @@ process_get_blk_mq_status_ioctl(inm_devhandle_t *handle, void *arg)
 	}
 
 ERR_EXIT:
+#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+	if (bdev_handle != NULL)
+		close_bdev_handle(bdev_handle);
+#else
 	if (bdev != NULL)
 		close_bdev(bdev, FMODE_READ);
+#endif
 	if (blk_mq_status != NULL)
 		INM_KFREE(blk_mq_status, sizeof(BLK_MQ_STATUS), 
 							INM_KERNEL_HEAP);
@@ -4270,7 +4292,7 @@ process_replication_state_ioctl(inm_devhandle_t *handle, void *arg)
 		error = -EINVAL;
 		goto out;
 	}
-	
+
 	ctxt = get_tgt_ctxt_from_uuid(rep->DeviceId.volume_guid);
 	if (!ctxt) {
 		err("Cannot find %s to set DS throttle", 
@@ -5704,7 +5726,7 @@ inm_s32_t process_get_drain_state_ioctl(inm_devhandle_t *handle, void *arg)
 		device_list_arg += sizeof(VOLUME_GUID);
 	}
 	INM_UP_READ(&(driver_ctx->tgt_list_sem));
-	
+
 	if (!INM_ACCESS_OK(VERIFY_WRITE, (void __user*)device_list_arg, 
 								out_size)) {
 		err("Access Violation for GET_DISK_STATE_OUTPUT");

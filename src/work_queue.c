@@ -99,7 +99,7 @@ timer_worker(void *context)
 					else
 						dbg("timeout without work item");
 				} else {
-					err("unknown wqe type");
+					err("unknown wqe type : %u", wqeptr->flags);
 					INM_BUG_ON(!(wqeptr->flags & WITEM_TYPE_TIMEOUT));
 				}
 			}
