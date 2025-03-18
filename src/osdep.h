@@ -83,7 +83,11 @@
 #include <linux/sched/signal.h>
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+#if defined(RHEL9_5)
+#ifndef INM_FILP_FOR_BDEV_ENABLED
+#define INM_FILP_FOR_BDEV_ENABLED
+#endif
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
 #ifndef INM_HANDLE_FOR_BDEV_ENABLED
 #define INM_HANDLE_FOR_BDEV_ENABLED
 #endif
@@ -133,9 +137,11 @@ struct _tag_info;
 struct _vol_info
 {
 	struct inm_list_head next;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle* handle;
-#endif	
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+    struct file *filp;
+#endif
 	inm_block_device_t  *bdev;
 	inm_super_block_t *sb;
 };
@@ -219,8 +225,10 @@ typedef struct freeze_vol_info
 {
 	struct inm_list_head freeze_list_entry;
 	char                 vol_name[TAG_VOLUME_MAX_LENGTH];
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
-	struct bdev_handle* handle;
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
+	struct bdev_handle   *handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+    struct file          *filp;
 #endif
 	inm_block_device_t   *bdev;
 	inm_super_block_t    *sb;
@@ -251,17 +259,23 @@ void unlock_volumes(int, tag_volinfo_t *);
 inm_s32_t is_rootfs_ro(void);
 
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 struct bdev_handle *inm_bdevhandle_open_by_dev_path(char *, int);
 struct bdev_handle *inm_bdevhandle_open_by_devnum(dev_t, unsigned);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+struct file *inm_file_open_by_dev_path(char *, int);
+struct file *inm_file_open_by_devnum(dev_t, unsigned);
 #else
 inm_block_device_t *open_by_dev_path(char *, int);
 inm_block_device_t *open_by_dev_path_v2(char *, int);
 struct block_device *inm_open_by_devnum(dev_t, unsigned);
 #endif
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 #define close_bdev_handle(handle)    bdev_release(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+#define close_file(filp)    fput(filp);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
@@ -511,7 +525,7 @@ typedef struct completion		inm_completion_t;
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 #define INM_COMPLETE_AND_EXIT(event, val)				\
 		kthread_complete_and_exit(event, val)
 #else
@@ -927,7 +941,7 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #endif
 #endif
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 typedef struct {
     /* empty dummy */
 } mm_segment_t;

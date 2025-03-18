@@ -4157,10 +4157,14 @@ prepare_volume_list(char *buf, struct inm_list_head *list_head,
 			}
 			vol_entry->tc_mirror_guid[len] = '\0';
 #ifdef INM_LINUX
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			vol_entry->mirror_handle = inm_bdevhandle_open_by_dev_path(
 				vol_entry->tc_mirror_guid, FMODE_WRITE);
 			if (!vol_entry->mirror_handle) {
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			vol_entry->mirror_filp = inm_file_open_by_dev_path(
+				vol_entry->tc_mirror_guid, FMODE_WRITE);
+			if (!vol_entry->mirror_filp) {
 #else
 			vol_entry->mirror_dev = open_by_dev_path(vol_entry->tc_mirror_guid, 1);
 			if (!vol_entry->mirror_dev || vol_entry->mirror_dev->bd_disk)  {
@@ -4172,10 +4176,14 @@ prepare_volume_list(char *buf, struct inm_list_head *list_head,
 				break;
 			}
 			else {
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 				vol_entry->mirror_dev = vol_entry->mirror_handle->bdev;
 				if (!keep_device_open) {
 					close_bdev_handle(vol_entry->mirror_handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+				vol_entry->mirror_dev = file_bdev(vol_entry->mirror_filp);
+				if (!keep_device_open) {
+					close_file(vol_entry->mirror_filp);
 #else				
 				if (!keep_device_open) {
 					close_bdev(vol_entry->mirror_dev, FMODE_WRITE);
