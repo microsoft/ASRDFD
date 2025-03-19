@@ -54,7 +54,7 @@ typedef struct __target_statistics {
 
 	/* counter for # of times switched to each write order state */
 	long num_change_to_wostate[MAX_WOSTATE_MODES];
-
+	
 	/* counter for # of times switched to each write order state */
 	long num_change_to_wostate_user[MAX_WOSTATE_MODES];
 
@@ -85,7 +85,7 @@ struct tgt_hist_stats {
 };
 
 typedef struct tgt_hist_stats tgt_hist_stats_t;
-
+	
 /* bitmap related declrations */
 typedef struct bitmap_info  {
 	char            bitmap_file_name[INM_NAME_MAX + 1]; /* UNICODE string */
@@ -111,7 +111,7 @@ typedef struct bitmap_info  {
 	inm_u64_t        nr_bytes_in_bmap;
 	inm_u32_t        bmap_busy_wait;
 	char            bitmap_dir_name[INM_NAME_MAX + 1]; /* UNICODE string */
-} bitmap_info_t;
+} bitmap_info_t; 
 
 struct create_delete_wait
 {
@@ -123,17 +123,19 @@ typedef struct _mirror_vol_entry
 {
 	struct inm_list_head next;
 	char                 tc_mirror_guid[INM_GUID_LEN_MAX];
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *mirror_handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *mirror_filp;
 #endif
 	inm_block_device_t  *mirror_dev;
 	inm_u64_t vol_error;
-	inm_u64_t vol_count;
-	inm_u64_t vol_byte_written;
-	inm_u64_t vol_io_issued;
-	inm_u64_t vol_io_succeeded;
-	inm_u64_t vol_io_skiped;
-	inm_u64_t vol_flags;
+	inm_u64_t vol_count;    
+	inm_u64_t vol_byte_written;    
+	inm_u64_t vol_io_issued;    
+	inm_u64_t vol_io_succeeded;    
+	inm_u64_t vol_io_skiped;    
+	inm_u64_t vol_flags;    
 	inm_s32_t vol_state;
 	inm_atomic_t vol_ref;
 	void      *vol_private;
@@ -233,7 +235,7 @@ typedef struct _target_context {
 	inm_sem_t        tc_sem;
 	inm_u32_t        refcnt;     /* Using reference counting infrastructe 
 	                                 provided by sysfs interface.                  */
-	void            (*release)(void *);
+	void            (*release)(void *); 
 
 	flt_mode        dummy_tc_cur_mode;  /* Current filtering mode for this target. */
 	flt_mode        dummy_tc_prev_mode; /* previous filtering mode for this target */
@@ -270,7 +272,7 @@ typedef struct _target_context {
 	inm_s64_t       tc_bytes_overlap_changes;
 	inm_s64_t       tc_cnode_pgs;
 	inm_s64_t       tc_commited_changes;
-	inm_s64_t       tc_bytes_commited_changes;
+	inm_s64_t       tc_bytes_commited_changes;    
 	inm_s64_t       tc_transaction_id;
 	inm_s64_t       tc_prev_transaction_id;
 	change_node_t  *tc_pending_confirm;
@@ -294,8 +296,8 @@ typedef struct _target_context {
 	inm_u64_t       tc_out_of_sync_time_stamp;
 	unsigned long   tc_out_of_sync_err_status;
 	unsigned long   tc_nr_out_of_sync_indicated;
-	inm_device_t    tc_dev_type;
-	void           *tc_priv;  /* points to host_dev_ctx/fabric_dev_ctx */
+	inm_device_t    tc_dev_type; 
+	void           *tc_priv;  /* points to host_dev_ctx/fabric_dev_ctx */  
 	bitmap_info_t  *tc_bp;        /* non-NULL if bitmap is enabled (default) */
 	/* ideally guid should be moved to device specific data structure, but
 	 * sysfs assumes this to be in here, so leaving it in here for now.
@@ -315,7 +317,7 @@ typedef struct _target_context {
 	struct inm_list_head tc_src_list;
 	struct inm_list_head tc_dst_list;
 	mirror_vol_entry_t *tc_vol_entry;
-
+	
 	char           *tc_mnt_pt;
 	inm_s32_t       tc_filtering_disable_required;
 	inm_u64_t	    tc_CurrEndSequenceNumber;
@@ -451,7 +453,7 @@ enum {
 
 #define is_target_enabled_for_data_filtering(ctx)    \
 	 (!(((target_context_t *) ctx)->tc_flags & VCF_DATA_MODE_DISABLED))
-
+	
 /* ( !((target_context_t *) ctx)->tc_flags & VCF_DATA_MODE_DISABLED) || \
  *     (driver_context->service_supports_data_filtering) || \
  *     (driver_context->enable_data_filtering)) ? 1 : 0

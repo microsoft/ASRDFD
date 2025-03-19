@@ -213,7 +213,7 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
 #else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
@@ -364,7 +364,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
@@ -383,7 +383,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 #endif
 	q_info->q = q;
 
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	if (q->disk->queue_kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
@@ -403,7 +403,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
 #else
 	q_info->orig_kobj_type =  q->kobj.ktype;
@@ -420,7 +420,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
 #else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
@@ -471,7 +471,6 @@ dump_bio(struct bio *bio)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)
 	bvec = &vec;
-
 	if (bio->bi_end_io == flt_end_io_fn && info) { /* end io */
 		INM_BVEC_ITER_IDX(iter) = info->bi_idx;
 		INM_BVEC_ITER_SECTOR(iter) = info->bi_sector;
@@ -1889,7 +1888,7 @@ blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&q->kobj);
@@ -2271,7 +2270,7 @@ flt_disk_removal(struct kobject *kobj)
 	set_tag_drain_notify_status(ctx, TAG_STATUS_DROPPED, 
 						DEVICE_STATUS_REMOVED);
 	volume_unlock(ctx);
-
+	
 	if (driver_ctx->dc_root_disk == ctx)
 		driver_ctx->dc_root_disk = NULL;
 
@@ -2329,14 +2328,14 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
-#if defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	qkobj = &disk->queue_kobj;
 #else
 	qkobj = &disk->queue->kobj;
 #endif
 	dbg("%s: queue = %p, kobj = %p, qkobj = %p", disk->disk_name, 
 			 			disk->queue, kobj, qkobj);
-
+	
 	if (!get_qinfo_from_kobj(qkobj)) {
 		info("%s: not protected", disk->disk_name);
 	} else {
@@ -2351,10 +2350,10 @@ out:
 
 void flt_part_obj_rel(struct kobject *kobj)
 {
-	dbg("Partition Removal:");
+	dbg("Partition Removal:");    
 	flt_disk_removal(kobj);
 	INM_BUG_ON(NULL == flt_part_release_fn);
-	flt_part_release_fn(kobj);
+	flt_part_release_fn(kobj);    
 }
 
 void flt_queue_obj_rel(struct kobject *kobj)
@@ -2367,7 +2366,7 @@ void flt_queue_obj_rel(struct kobject *kobj)
 	dbg("Calling Original queue release function");
 
 	if(req_q->orig_kobj_type->release)
-		req_q->orig_kobj_type->release(kobj);
+		req_q->orig_kobj_type->release(kobj);    
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
@@ -2395,14 +2394,14 @@ static inm_s32_t completion_check_endio(struct bio *bio, inm_u32_t done,
 		ctx->tc_lock_fn = volume_lock_bh;
 		ctx->tc_unlock_fn = volume_unlock_bh;
 	} 
-
+	
 	__free_page(bio->bi_io_vec[0].bv_page);
 	bio->bi_io_vec[0].bv_page = NULL;
 
 	bio_put(bio);
 
 	INM_COMPLETE(&req->comp);
-
+	
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
 	return 0;
 #endif
@@ -2462,7 +2461,7 @@ flt_revalidate_disk(struct gendisk *disk)
 	 * ptr outside the lock.
 	 */
 	volume_lock(tgt_ctx);
-	if (hdc_dev->hdc_fops && 
+	if (hdc_dev->hdc_fops &&                
 		hdc_dev->hdc_fops->revalidate_disk)
 		org_revalidate_disk = hdc_dev->hdc_fops->revalidate_disk;
 	volume_unlock(tgt_ctx);
@@ -2471,7 +2470,7 @@ flt_revalidate_disk(struct gendisk *disk)
 		error = org_revalidate_disk(disk);
 
 	nr_sect = get_capacity(disk);
-
+  
 	volume_lock(tgt_ctx);
 	/*
 	 * get_capacity() returns no. of 512 byte sector 
@@ -2486,7 +2485,7 @@ flt_revalidate_disk(struct gendisk *disk)
 		hdcp->hdc_actual_end_sect = nr_sect - 1;
 	}
 	volume_unlock(tgt_ctx);
-
+	
 	put_tgt_ctxt(tgt_ctx);
 
 	/* return error code from original revalidate_disk() */
@@ -2514,13 +2513,13 @@ unregister_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 #endif
 
 	dbg("Unregistering for disk change notification");
-
+	
 	flt_fops = disk->fops;
 	volume_lock(ctx);
 	disk->fops = hdc_dev->hdc_fops;
 	hdc_dev->hdc_fops = NULL;
 	volume_unlock(ctx);
-
+	
 	INM_KFREE(flt_fops, sizeof(*flt_fops), INM_KERNEL_HEAP);
 }
 
@@ -2538,7 +2537,7 @@ register_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 		return;
 	}
 #endif
-
+  
 	/*
 	 * If the allocation fails, we fall back to beyond range 
 	 * check in make_request_fn to determine disk resize.
@@ -2577,34 +2576,40 @@ register_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 		set_volume_out_of_sync(ctx, ERROR_TO_REG_INVALID_IO, -EBADF);
 	}
 }
-
+	
 int
 stack_host_dev(target_context_t *ctx, inm_dev_extinfo_t *dinfo)
 {
 	inm_s32_t ret = 0;
 	req_queue_info_t *q_info;
 	inm_s32_t found = 0;
-	inm_block_device_t *bdev;
+	inm_block_device_t *bdev = NULL;
 	host_dev_ctx_t *hdcp;
 	target_context_t *tgt_ctx;
 	struct inm_list_head *ptr1, *ptr2;
 	host_dev_t *hdc_dev = NULL;
 	mirror_vol_entry_t *vol_entry = NULL;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp;
 #endif
 
 	hdcp = (host_dev_ctx_t *)ctx->tc_priv;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	handle = inm_bdevhandle_open_by_dev_path(dinfo->d_guid, FMODE_READ);
 	if (handle) {
 		bdev = handle->bdev;
+	}
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	filp = inm_file_open_by_dev_path(dinfo->d_guid, FMODE_READ);
+	if (filp) {
+		bdev = file_bdev(filp);
 	}
 #else
 	bdev = open_by_dev_path(dinfo->d_guid, 0); /* open by device path */
 #endif
 	if (!bdev) {
-
 		dbg("Failed to convert dev path (%s) to bdev", dinfo->d_guid);
 		ret = -ENODEV;
 		return ret;
@@ -2617,8 +2622,10 @@ stack_host_dev(target_context_t *ctx, inm_dev_extinfo_t *dinfo)
 				driver_ctx->dc_host_info.bio_info_cache);
 	if (!hdcp->hdc_bio_info_pool) {
 		err("INM_MEMPOOL_CREATE failed");
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file(filp);
 #else
 		close_bdev(bdev, FMODE_READ);
 #endif
@@ -2728,15 +2735,16 @@ retry:
 				INM_BUG_ON(1);
 				ret = -EINVAL;
 	}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	close_file(filp);
 #else
 	close_bdev(bdev, FMODE_READ);
 #endif
 	if (ret) {
 		inm_rel_dev_resources(ctx, hdcp);
 		return ret;
-
 	}
 
 	/* If the volume is marked for stop filtering, then use the size
@@ -2828,8 +2836,10 @@ isrootdisk(target_context_t *vcptr)
 	struct inm_list_head *hptr = NULL;
 	inm_s32_t isroot = 0;
 	inm_dev_t boot_dev = 0;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *rfilp;
 #endif
 	do {
 		if (vcptr->tc_dev_type != FILTER_DEV_HOST_VOLUME &&
@@ -2838,16 +2848,22 @@ isrootdisk(target_context_t *vcptr)
 
 		if (!driver_ctx->root_dev)
 			break;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		handle = inm_bdevhandle_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 		if (IS_ERR(handle))
 			break;
 		rbdev = handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		rfilp = inm_file_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
+		if (IS_ERR(rfilp))
+			break;
+		rbdev = file_bdev(rfilp);
 #else
 		rbdev = inm_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 		if (IS_ERR(rbdev))
 			break;
 #endif
+
 		dbg("Root gendisk name %p = %s", 
 				rbdev->bd_disk, rbdev->bd_disk->disk_name);
 		hdcp = (host_dev_ctx_t *)vcptr->tc_priv;
@@ -2866,22 +2882,31 @@ isrootdisk(target_context_t *vcptr)
 				hdc_dev = NULL;
 			}
 		}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file(rfilp);
 #else
 		close_bdev(rbdev, FMODE_READ);
 #endif
+
 		if (isroot)
 			break;
 
 		if (get_boot_dev_t(&boot_dev))
 			break;
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		handle = inm_bdevhandle_open_by_devnum(boot_dev, FMODE_READ);
 		if (IS_ERR(handle))
 			break;
 		rbdev = handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		rfilp = inm_file_open_by_devnum(boot_dev, FMODE_READ);
+		if (IS_ERR(rfilp))
+			break;
+		rbdev = file_bdev(rfilp);
 #else
 		rbdev = inm_open_by_devnum(boot_dev, FMODE_READ);
 		if (IS_ERR(rbdev))
@@ -2903,8 +2928,10 @@ isrootdisk(target_context_t *vcptr)
 			}
 		}
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file(rfilp);
 #else
 		close_bdev(rbdev, FMODE_READ);
 #endif
@@ -2975,16 +3002,16 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 	case IOCTL_INMAGE_VOLUME_STACKING:
 		error = process_volume_stacking_ioctl(filp, 
 							(void __user *)arg);
-		break;
+		break;    
 
 	case IOCTL_INMAGE_MIRROR_VOLUME_STACKING:
 		error = process_mirror_volume_stacking_ioctl(filp, 
 				  			(void __user *)arg);
-		break;
+		break;    
 
 	case IOCTL_INMAGE_PROCESS_START_NOTIFY:
 		error = process_start_notify_ioctl(filp, (void __user *)arg);
-		break;
+		break;    
 
 	case IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY:
 		error = process_shutdown_notify_ioctl(filp, 
@@ -3020,7 +3047,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 		error = process_commit_revert_tag_ioctl(filp, 
 							(void __user *)arg);
 		break;
-
+	
 	case IOCTL_INMAGE_CREATE_BARRIER_ALL:
 		error = process_create_iobarrier_ioctl(filp, 
 							(void __user *)arg);
@@ -3065,7 +3092,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 		error = process_get_volume_flags_ioctl(filp, 
 							(void __user *)arg);
 		break;
-
+				
 	case IOCTL_INMAGE_SET_VOLUME_FLAGS:
 		error = process_set_volume_flags_ioctl(filp, 
 							(void __user *)arg);
@@ -3348,7 +3375,7 @@ inm_s32_t flt_flush(struct file *filp)
 
 	/* Perform cleanup due to drainer shutdown. private_data will be
 	 * set to non-null for fd which issues PROCESS_START_NOTIFY.
-	 */
+	 */    
 
 	return 0;
 }
@@ -3411,7 +3438,7 @@ inm_s32_t flt_mmap(struct file *filp, struct vm_area_struct *vma)
 				  PAGE_SHARED)) {
 			err("remap failed");
 			status = -ENOMEM;
-			break;
+			break;                
 		}
 
 		vm_offset += PAGE_SIZE;
@@ -3529,7 +3556,7 @@ inm_s32_t __init involflt_init(void)
 		goto free_dc_and_exit;
 	}
 
-	INM_MEM_ZERO(&driver_ctx->flt_cdev, sizeof(inm_cdev_t));
+	INM_MEM_ZERO(&driver_ctx->flt_cdev, sizeof(inm_cdev_t));    
 	cdev_init(&driver_ctx->flt_cdev, &flt_ops);
 	driver_ctx->flt_cdev.owner = THIS_MODULE;
 	driver_ctx->flt_cdev.ops = &flt_ops;
@@ -3575,7 +3602,7 @@ inm_s32_t __init involflt_init(void)
 	driver_ctx->flags |= DC_FLAGS_INVOLFLT_LOAD;
 	init_boottime_stacking();
 	driver_ctx->flags &= ~DC_FLAGS_INVOLFLT_LOAD;
-
+	
 	if (driver_state & DRV_LOADED_FULLY) {
 		if (driver_ctx->clean_shutdown)
 		inm_flush_clean_shutdown(UNCLEAN_SHUTDOWN); 
@@ -3607,8 +3634,10 @@ block_sd_open()
 	struct scsi_device *sdp = NULL;
 	inm_u32_t i = 0;
 	inm_u32_t error = 0;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp;
 #endif
 	dbg("entered");
 
@@ -3624,9 +3653,7 @@ block_sd_open()
 		snprintf(guid->volume_guid, GUID_SIZE_IN_CHARS-1, 
 				  			"/dev/sd%c", 'a' + i);
 		guid->volume_guid[GUID_SIZE_IN_CHARS-1] = '\0';
-
-		//struct bdev_handle *handle;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		handle = inm_bdevhandle_open_by_dev_path(guid->volume_guid, FMODE_READ);
 		if (handle) {
 			bdev = handle->bdev;
@@ -3634,6 +3661,14 @@ block_sd_open()
 		}
 	}
 	if (!handle) {
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		filp = inm_file_open_by_dev_path(guid->volume_guid, FMODE_READ);
+		if (filp) {
+			bdev = file_bdev(filp);
+			break;
+		}
+	}
+	if (!filp) {
 #else
 		bdev = open_by_dev_path(guid->volume_guid, 0);
 		if (bdev && !IS_ERR(bdev)){
@@ -3644,7 +3679,7 @@ block_sd_open()
 #endif
 		error = 1;
 		goto out;
-	} 
+	}
 	bd_disk = bdev->bd_disk;
 	if (!bd_disk || 
 		!inm_get_parent_dev(bd_disk)) {
@@ -3686,7 +3721,7 @@ void __exit involflt_exit(void)
 
 	restore_disk_rel_ptrs();
 
-	cdev_del(&driver_ctx->flt_cdev);
+	cdev_del(&driver_ctx->flt_cdev);    
 	unregister_chrdev_region(driver_ctx->flt_dev, 1);
 	destroy_alloc_thread();
 	destroy_service_thread();
@@ -3715,7 +3750,7 @@ inm_prepare_atbuf(inm_mirror_atbuf *atbuf_wrap, inm_buf_t *bp,
 				mirror_vol_entry_t *vol_entry, inm_u32_t count)
 {
 	inm_u32_t more = 0;
-
+	
 	memcpy_s((&(atbuf_wrap->imb_atbuf_buf)), sizeof(inm_buf_t), bp, sizeof(inm_buf_t));
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,8,13)
 	atbuf_wrap->imb_atbuf_buf.bi_destructor = NULL;

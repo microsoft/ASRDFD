@@ -33,7 +33,7 @@ ifeq (, $(VERSION_MINOR))
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
-	VERSION_BUILDNUM:=3
+	VERSION_BUILDNUM:=4
 endif
 
 ifeq (, $(VERSION_PRIVATE))
@@ -177,6 +177,10 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 
 	ifeq ($(findstring 5.14.0-427, $(KDIR)), 5.14.0-427)
 		EXTRA_CFLAGS += -DRHEL9_4
+	endif
+
+	ifeq ($(findstring 5.14.0-503, $(KDIR)), 5.14.0-503)
+		EXTRA_CFLAGS += -DRHEL9_5
 	endif
 
 	ifeq ($(findstring uek, $(KDIR)), uek)

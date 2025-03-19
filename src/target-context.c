@@ -143,7 +143,7 @@ inm_tc_reserv_init(target_context_t *ctx, int vol_lock)
 
 	if (vol_lock)
 		volume_lock(ctx);
-
+	
 	tc_res_pages = ctx->tc_reserved_pages;
 	ctx->tc_reserved_pages = 0;
 	/* Add page reservations to this context */
@@ -179,9 +179,9 @@ retry:
 
 			if (vol_lock)
 				volume_lock(ctx);
-
+		
 			ret = inm_tc_resv_add(ctx, tc_res_pages);
-
+		
 			if (vol_lock)
 				volume_unlock(ctx);
 
@@ -206,7 +206,7 @@ static_inline void
 inm_tc_reserv_deinit(target_context_t *ctx)
 {
 	inm_s32_t ret = -1;
-
+  
 	if ((ret = inm_tc_resv_del(ctx, ctx->tc_reserved_pages))) {
 		/* 
 		 * we could not release page reservations - not good
@@ -255,7 +255,7 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 
 	ctx->tc_data_log_dir = INM_KMALLOC(INM_PATH_MAX, INM_KM_SLEEP, 
 							INM_KERNEL_HEAP);
-	if(!ctx->tc_data_log_dir) {
+	if(!ctx->tc_data_log_dir) {	
 		err = -ENOMEM;
 		goto out_err;
 	}
@@ -307,10 +307,10 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 	 */
 	ctx->tc_stats.st_mode_switch_time = INM_GET_CURR_TIME_IN_SEC;
 	ctx->tc_stats.st_wostate_switch_time = INM_GET_CURR_TIME_IN_SEC;
-	INM_INIT_SEM(&ctx->tc_sem);
-	INM_INIT_SEM(&ctx->tc_resync_sem);
+	INM_INIT_SEM(&ctx->tc_sem);   
+	INM_INIT_SEM(&ctx->tc_resync_sem);   
 	ctx->tc_cur_mode = FLT_MODE_UNINITIALIZED;
-	ctx->tc_prev_mode = FLT_MODE_UNINITIALIZED;
+	ctx->tc_prev_mode = FLT_MODE_UNINITIALIZED;	
 	ctx->tc_cur_wostate = ecWriteOrderStateUnInitialized;
 	ctx->tc_prev_wostate = ecWriteOrderStateUnInitialized;
 	ctx->tc_dev_state = DEVICE_STATE_ONLINE;
@@ -396,8 +396,8 @@ ret1:
 	INM_DESTROY_WAITQUEUE_HEAD(&ctx->tc_waitq);
 	INM_DESTROY_SPIN_LOCK(&ctx->tc_tunables_lock);
 	INM_DESTROY_SPIN_LOCK(&(ctx->tc_lock));
-	INM_DESTROY_SEM(&ctx->tc_sem);
-	INM_DESTROY_SEM(&ctx->tc_resync_sem);
+	INM_DESTROY_SEM(&ctx->tc_sem);   
+	INM_DESTROY_SEM(&ctx->tc_resync_sem);   
 	INM_KFREE(ctx->tc_mnt_pt, INM_PATH_MAX, INM_KERNEL_HEAP);
 	ctx->tc_mnt_pt = NULL;
 	INM_KFREE(ctx->tc_db_v2, sizeof(UDIRTY_BLOCK_V2), INM_KERNEL_HEAP);
@@ -491,8 +491,8 @@ tgt_ctx_common_deinit(target_context_t *ctx)
 	INM_DESTROY_WAITQUEUE_HEAD(&ctx->tc_waitq);
 	INM_DESTROY_SPIN_LOCK(&ctx->tc_tunables_lock);
 	INM_DESTROY_SPIN_LOCK(&(ctx->tc_lock));
-	INM_DESTROY_SEM(&ctx->tc_sem);
-	INM_DESTROY_SEM(&ctx->tc_resync_sem);
+	INM_DESTROY_SEM(&ctx->tc_sem);   
+	INM_DESTROY_SEM(&ctx->tc_resync_sem);   
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("leaving");
 	}
@@ -512,11 +512,11 @@ tgt_ctx_spec_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 	case FILTER_DEV_MIRROR_SETUP:
 	if (stack_host_dev(ctx, dev_info)) {
 		error = 1;
-		goto out;
+		goto out;	
 	}
 		error = 0;
 	break;
-
+	
 	case FILTER_DEV_FABRIC_LUN:
 		if ((error = fabric_volume_init(ctx, 
 						(inm_dev_info_t*)dev_info))) {
@@ -548,11 +548,11 @@ tgt_ctx_spec_deinit(target_context_t *ctx)
 				INM_REL_DEV_RESOURCES(ctx);
 			}
 			break;
-
+	
 		case FILTER_DEV_FABRIC_LUN:
 			fabric_volume_deinit(ctx);
 			break;
-
+		
 		default:
 			break;
 	}
@@ -978,7 +978,7 @@ set_tgt_ctxt_filtering_mode(target_context_t *tgt_ctxt, flt_mode new_flt_mode,
 
 	time_in_secs = (tgt_ctxt->tc_stats.st_mode_switch_time - \
 				 last_time);
-
+	
 	/* add the value to respective mode. */
 	tgt_ctxt->tc_stats.num_secs_in_flt_mode[curr_flt_mode] += time_in_secs;
 
@@ -1014,7 +1014,7 @@ set_tgt_ctxt_filtering_mode(target_context_t *tgt_ctxt, flt_mode new_flt_mode,
 	return 0;
 }
 
-inm_s32_t 
+inm_s32_t   
 set_tgt_ctxt_wostate(target_context_t *tgt_ctxt, etWriteOrderState new_wostate,
 			 inm_s32_t service_initiated, etWOSChangeReason reason)
 {
@@ -1307,7 +1307,7 @@ fs_freeze_volume(target_context_t *ctxt, struct inm_list_head *head)
 			break;
 		}
 		INM_MEM_ZERO(vinfo, sizeof(vol_info_t));
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		vinfo->handle = inm_bdevhandle_open_by_devnum(hdc_dev->hdc_dev,
 					FMODE_READ | FMODE_WRITE);
 		if (IS_ERR(vinfo->handle)) {
@@ -1317,6 +1317,16 @@ fs_freeze_volume(target_context_t *ctxt, struct inm_list_head *head)
 			break;
 		}
 		vinfo->bdev = vinfo->handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		vinfo->filp = inm_file_open_by_devnum(hdc_dev->hdc_dev,
+					FMODE_READ | FMODE_WRITE);
+		if (IS_ERR(vinfo->filp)) {
+			info(" failed to open block device file %s", ctxt->tc_guid);
+			vinfo->filp = NULL;
+			INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);
+			break;
+		}
+		vinfo->bdev = file_bdev(vinfo->filp);
 #else
 		vinfo->bdev = inm_open_by_devnum(hdc_dev->hdc_dev, 
 						FMODE_READ | FMODE_WRITE);
@@ -1326,7 +1336,7 @@ fs_freeze_volume(target_context_t *ctxt, struct inm_list_head *head)
 			INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);
 			break;
 		}
-#endif
+#endif		
 		inm_freeze_bdev(vinfo->bdev, vinfo->sb);
 		success++;
 		inm_list_add_tail(&vinfo->next, head);
@@ -1369,11 +1379,13 @@ thaw_volume(target_context_t *ctxt, struct inm_list_head *head)
 		} else {
 			dbg("Thaw successful for device %s", ctxt->tc_guid);
 		}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(vinfo->handle);
-#else
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file(vinfo->filp);
+#else		
 		close_bdev(vinfo->bdev, FMODE_READ | FMODE_WRITE);
-#endif
+#endif	
 		INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);
 	}
 }
@@ -1399,7 +1411,7 @@ void target_context_release(target_context_t *ctxt)
 	inm_free_host_dev_ctx(ctxt->tc_priv);
 
 	INM_DESTROY_SEM(&ctxt->cdw_sem);
-
+	
 	if(ctxt->tc_dev_type == FILTER_DEV_MIRROR_SETUP){
 		free_tc_global_at_lun(&(ctxt->tc_dst_list));
 		inm_deref_all_vol_entry_tcp(ctxt);
@@ -1633,7 +1645,7 @@ void do_clear_diffs(target_context_t *tgt_ctxt)
 	tgt_ctxt->tc_stats.st_mode_switch_time = INM_GET_CURR_TIME_IN_SEC;
 	tgt_ctxt->tc_stats.st_wostate_switch_time = INM_GET_CURR_TIME_IN_SEC;
 	volume_unlock(tgt_ctxt);
-
+	
 	if (vbmap)
 		close_bitmap_file(vbmap, TRUE);
 
@@ -1711,17 +1723,17 @@ collect_latency_stats(inm_latency_stats_t *lat_stp, inm_u64_t time_in_usec)
 				break;
 			}
 		}
-	}
-
+	}	
+	
 	lat_stp->ls_freq[idx]++;
 	if (!lat_stp->ls_init_min_max) {
 		lat_stp->ls_log_min = lat_stp->ls_log_max = time_in_usec;
 		lat_stp->ls_init_min_max = 1;
 	}
-	if (lat_stp->ls_log_min > time_in_usec) {
+	if (lat_stp->ls_log_min > time_in_usec) {	
 		lat_stp->ls_log_min = time_in_usec;
 	}
-	if (lat_stp->ls_log_max < time_in_usec) {
+	if (lat_stp->ls_log_max < time_in_usec) {	
 		lat_stp->ls_log_max = time_in_usec;
 	}
 
@@ -1750,8 +1762,8 @@ retrieve_volume_latency_stats(target_context_t *tcp,
 	vlsp->s2dbret_nr_avail_bkts = tcp->tc_dbret_latstat.ls_nr_avail_bkts;
 	vlsp->s2dbret_log_min = tcp->tc_dbret_latstat.ls_log_min;
 	vlsp->s2dbret_log_max = tcp->tc_dbret_latstat.ls_log_max;
-
-
+	
+	
 	memcpy_s(vlsp->s2dbwait_notify_bkts, 
 			sizeof(tcp->tc_dbwait_notify_latstat.ls_bkts),
 			tcp->tc_dbwait_notify_latstat.ls_bkts, 
@@ -1766,7 +1778,7 @@ retrieve_volume_latency_stats(target_context_t *tcp,
 				tcp->tc_dbwait_notify_latstat.ls_log_min;
 	vlsp->s2dbwait_notify_log_max = 
 				tcp->tc_dbwait_notify_latstat.ls_log_max;
-
+	
 	memcpy_s(vlsp->s2dbcommit_bkts, 
 			sizeof(tcp->tc_dbcommit_latstat.ls_bkts),
 			tcp->tc_dbcommit_latstat.ls_bkts, 
@@ -1801,7 +1813,7 @@ retrieve_volume_latency_stats(target_context_t *tcp,
 		vlsp->s2dbcommit_log_buf[o_idx] = 
 				tcp->tc_dbcommit_latstat.ls_log_buf[idx];
 		tcp->tc_dbcommit_latstat.ls_log_idx++;
-
+		
 	}
 }
 
@@ -1899,7 +1911,7 @@ void end_cx_session()
 	get_time_stamp(&(vm_cx_sess->vcs_end_ts));
 
 	for (ptr = driver_ctx->dc_disk_cx_sess_list.next;
-			ptr != &(driver_ctx->dc_disk_cx_sess_list);
+			ptr != &(driver_ctx->dc_disk_cx_sess_list); 
 			ptr = ptr->next) {
 		disk_cx_sess = inm_list_entry(ptr, disk_cx_session_t, 
 								dcs_list);
@@ -2192,7 +2204,7 @@ void update_cx_session(target_context_t *ctxt, inm_u32_t nr_bytes)
 		 (ctxt->tc_bytes_pending_changes + nr_bytes) >
 					  CX_SESSION_PENDING_BYTES_THRESHOLD) {
 		for (ptr = driver_ctx->dc_disk_cx_sess_list.next;
-				ptr != &driver_ctx->dc_disk_cx_sess_list;
+				ptr != &driver_ctx->dc_disk_cx_sess_list; 
 				ptr = ptr->next) {
 			disk_cx_session_t *dcs;
 
@@ -2418,7 +2430,7 @@ void reset_s2_latency_time()
 		volume_unlock(ctxt);
 	}
 	INM_UP_READ(&driver_ctx->tgt_list_sem);
-
+	
 }
 
 void volume_lock_all_close_cur_chg_node(void)

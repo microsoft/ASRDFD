@@ -72,7 +72,7 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -198,24 +198,35 @@ void unlock_volumes(inm_s32_t vols, tag_volinfo_t *vol_list)
 	}
 }
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED) || defined(INM_FILP_FOR_BDEV_ENABLED)
 inm_s32_t
 is_rootfs_ro(void)
 {
 	int retval = 0;
 	inm_block_device_t *bdevp = NULL;
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle = NULL;
-
-	/* check whether root file system is in read only mode */
 	handle = inm_bdevhandle_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 	if (IS_ERR(handle))
 		return 0;
 	bdevp = handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp = NULL;
+	/* check whether root file system is in read only mode */
+	filp = inm_file_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
+	if (IS_ERR(filp))
+		return 0;
+	bdevp = file_bdev(filp);
+#endif
 	if (bdev_read_only(bdevp)) {
 		dbg("root is read only file system \n");
 		retval = 1;
 	}
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	close_file(filp);
+#endif
 	return retval;
 }
 
@@ -309,10 +320,11 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 	struct inm_list_head *ptr = NULL,*nextptr = NULL;
 	mirror_vol_entry_t *vol_entry;
 	host_dev_t *hdc_dev = NULL;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp = NULL;
 #endif
-
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		info("dev_validate: entered");
 	}
@@ -328,10 +340,14 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 
 	switch (dev_info->d_type) {
 		case FILTER_DEV_HOST_VOLUME:
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		handle = inm_bdevhandle_open_by_dev_path(dev_info->d_guid, FMODE_READ);
 		if (handle) {
 			bdev = handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		filp = inm_file_open_by_dev_path(dev_info->d_guid, FMODE_READ);
+		if (filp) {
+			bdev = file_bdev(filp);
 #else
 		bdev = open_by_dev_path(dev_info->d_guid, 0); /* open by device path */
 		if (bdev) {
@@ -363,8 +379,11 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 			(*hdcp)->hdc_actual_end_sect = (*hdcp)->hdc_start_sect +
 					get_capacity(bdev->bd_disk) - 1;
 #endif
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			close_file(filp);
 #else
 			close_bdev(bdev, FMODE_READ);
 #endif
@@ -376,10 +395,14 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 		break;
 
 		case FILTER_DEV_MIRROR_SETUP:
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		handle = inm_bdevhandle_open_by_dev_path(dev_info->d_guid, FMODE_READ);
 		if (handle) {
 			bdev = handle->bdev;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		filp = inm_file_open_by_dev_path(dev_info->d_guid, FMODE_READ);
+		if (filp) {
+			bdev = file_bdev(filp);
 #else
 		bdev = open_by_dev_path(dev_info->d_guid, 0); /* open by device path */
 		if (bdev) {
@@ -425,8 +448,10 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 					break;
 				}
 			}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			close_file(filp);
 #else
 			close_bdev(bdev, FMODE_READ);
 #endif
@@ -461,7 +486,7 @@ inm_s32_t flt_release(struct inode *inode, struct file *filp)
 	if (driver_ctx->svagent_idhp == filp) {
 		inm_svagent_exit();
 	} else if (driver_ctx->sentinal_idhp == filp) {
-		inm_s2_exit();
+		inm_s2_exit();	
 	} else {
 		tgt_ctxt =  (target_context_t *)filp->private_data;
 
@@ -482,7 +507,7 @@ target_context_t *get_tgt_ctxt_from_kobj(struct kobject *kobj)
 {
 	struct inm_list_head *ptr;
 	target_context_t *tgt_ctxt = NULL;
-	host_dev_ctx_t *hdcp;
+	host_dev_ctx_t *hdcp; 
 	struct inm_list_head *hptr;
 	host_dev_t *hdc_dev = NULL;
 
@@ -534,7 +559,7 @@ target_context_t *get_tgt_ctxt_from_bio(struct bio *bio)
 	sector_t end_sector;
 	int found = 0;
 
-	for(ptr = driver_ctx->tgt_list.next;
+	for(ptr = driver_ctx->tgt_list.next; 
 		ptr != &(driver_ctx->tgt_list);
 		ptr = ptr->next) {
 		tgt_ctxt = inm_list_entry(ptr, target_context_t, tc_list);
@@ -589,7 +614,7 @@ target_context_t *get_tgt_ctxt_from_bio(struct bio *bio)
 						 */
 						hdcp->hdc_actual_end_sect = 
 						get_capacity(hdc_dev->hdc_disk_ptr) - 1;
-
+						    
 						err("%s: Resize: Expected: %llu, New: %llu",
 							tgt_ctxt->tc_guid, (inm_u64_t)hdcp->hdc_end_sect, 
 							(inm_u64_t)hdcp->hdc_actual_end_sect);
@@ -605,14 +630,14 @@ target_context_t *get_tgt_ctxt_from_bio(struct bio *bio)
 						((INM_BUF_SECTOR(bio) < hdcp->hdc_start_sect) &&
 						(end_sector > hdcp->hdc_end_sect)) || /* Super Set    */
 						((INM_BUF_SECTOR(bio) > hdcp->hdc_end_sect) &&
-						(INM_BUF_SECTOR(bio) <= hdcp->hdc_actual_end_sect))) {
+						(INM_BUF_SECTOR(bio) <= hdcp->hdc_actual_end_sect))) { 
 
 						err("Unable to handle the spanning I/O across multiple "
 							"partitions/volumes");
 						queue_worker_routine_for_set_volume_out_of_sync(tgt_ctxt,
 								ERROR_TO_REG_INVALID_IO, -EINVAL);
 					}
-				}
+				} 
 			}
 		}
 		tgt_ctxt = NULL;
@@ -657,7 +682,7 @@ out:
 	return r;
 }
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 struct bdev_handle *
 inm_bdevhandle_open_by_dev_path(char *path, int mode)
 {
@@ -673,7 +698,22 @@ inm_bdevhandle_open_by_dev_path(char *path, int mode)
 
 	return handle;
 }
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+struct file *
+inm_file_open_by_dev_path(char *path, int mode)
+{
+	inm_dev_t dev = 0;
+	struct file *filp;
 
+	if(!path)
+		return NULL;
+
+	filp = bdev_file_open_by_path(path, mode, NULL, NULL);
+	if (IS_ERR(filp))
+		return NULL;
+
+	return filp;
+}
 #else
 inm_block_device_t *
 open_by_dev_path_v2(char *path, int mode)
@@ -705,11 +745,11 @@ open_by_dev_path(char *path, int mode)
 	if(!path)
 		return NULL;
 
-	if(convert_path_to_dev((const char *)path, &dev))
+	if(convert_path_to_dev((const char *)path, &dev)) 
 		return NULL;
 
 	bdev = inm_open_by_devnum(dev, mode == 0 ? FMODE_READ : FMODE_WRITE);
-	if(IS_ERR(bdev))
+	if(IS_ERR(bdev)) 
 		return NULL;
 
 	return bdev;
@@ -726,7 +766,7 @@ inm_s32_t alloc_data_pages(struct inm_list_head *head, inm_u32_t nr_pages,
 			 inm_u32_t *actual_nr_pages, inm_s32_t flags)
 {
 	data_page_t *page = NULL;
-
+	
 	/* Do basic checks on the requested number of pages.
 	 */
 
@@ -737,17 +777,17 @@ inm_s32_t alloc_data_pages(struct inm_list_head *head, inm_u32_t nr_pages,
 							INM_KERNEL_HEAP);
 		if(!page)
 			break;
-
+		
 		page->page = INM_ALLOC_MAPPABLE_PAGE(flags);
-		if(!page->page)
+		if(!page->page)    
 			break;
-
+		
 		INM_SET_PAGE_RESERVED(page->page);
 
 		inm_list_add_tail(&page->next, head);
 		(*actual_nr_pages)++;
 	}
-
+	
 	if((*actual_nr_pages) == 0)
 		return 0;
 
@@ -761,7 +801,7 @@ void free_data_pages(struct inm_list_head *head)
 	struct inm_list_head *ptr;
 	data_page_t *entry;
 	inm_s32_t num_pages = 0;
-
+	
 	if(head == NULL)
 		return;
 
@@ -775,7 +815,7 @@ void free_data_pages(struct inm_list_head *head)
 		num_pages++;
 	}
 
-	info("Data Mode Unint: Freed Data Pages: %d\n", num_pages);
+	info("Data Mode Unint: Freed Data Pages: %d\n", num_pages);    
 }
 
 void
@@ -832,8 +872,10 @@ inm_dev_id_get(target_context_t *ctx)
 	inm_block_device_t *bdev;
 	inm_dev_t    devid = 0;
 	host_dev_t *hdc_dev = NULL;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp = NULL;
 #endif
 
 	switch(ctx->tc_dev_type) {
@@ -853,12 +895,18 @@ inm_dev_id_get(target_context_t *ctx)
 		else {
 			/* crash in debug build if target context is without devt */
 			INM_BUG_ON(1);
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			handle = inm_bdevhandle_open_by_dev_path(ctx->tc_guid, FMODE_READ);
 			if (handle) {
 				bdev = handle->bdev;
 				devid = bdev->bd_inode->i_rdev;
 				close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			filp = inm_file_open_by_dev_path(ctx->tc_guid, FMODE_READ);
+			if (filp) {
+				bdev = file_bdev(filp);
+				devid = bdev->bd_inode->i_rdev;
+				close_file(filp);
 #else
 			bdev = open_by_dev_path(ctx->tc_guid, 0);
 			if (bdev) {
@@ -902,16 +950,23 @@ inm_get_mirror_dev(mirror_vol_entry_t *vol_entry)
 		ret = -ENXIO;
 		goto out;
 	}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	vol_entry->mirror_handle = inm_bdevhandle_open_by_dev_path(
 		vol_entry->tc_mirror_guid, FMODE_WRITE);
 	if (vol_entry->mirror_handle) {
 		vol_entry->mirror_dev = vol_entry->mirror_handle->bdev;
 	}
 	else {
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	vol_entry->mirror_filp = inm_file_open_by_dev_path(
+		vol_entry->tc_mirror_guid, FMODE_WRITE);
+	if (vol_entry->mirror_filp) {
+		vol_entry->mirror_dev = file_bdev(vol_entry->mirror_filp);
+	}
+	else {
 #else
 	vol_entry->mirror_dev = open_by_dev_path(vol_entry->tc_mirror_guid, 1);
-	if (!vol_entry->mirror_dev || !vol_entry->mirror_dev->bd_disk) {
+	if (!vol_entry->mirror_dev || vol_entry->mirror_dev->bd_disk)  {
 #endif
 		err("Failed to open the volume:%s mirror_dev:%p",
 		vol_entry->tc_mirror_guid, vol_entry->mirror_dev);
@@ -928,10 +983,14 @@ out:
 void
 inm_free_mirror_dev(mirror_vol_entry_t *vol_entry)
 {
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	if (vol_entry->mirror_handle) {
 		close_bdev_handle(vol_entry->mirror_handle);
 		vol_entry->mirror_handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	if (vol_entry->mirror_filp) {
+		close_file(vol_entry->mirror_filp);
+		vol_entry->mirror_filp = NULL;
 #else
 	if (vol_entry->mirror_dev) {
 		close_bdev(vol_entry->mirror_dev, FMODE_WRITE);
@@ -945,26 +1004,35 @@ inm_get_dev_t_from_path(const char *pathp)
 {
 	inm_dev_t rdev = 0;
 	inm_block_device_t *bdevp = NULL;
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *filp = NULL;
 #endif
+
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered path:%s", pathp);
 	}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	handle = inm_bdevhandle_open_by_dev_path((char *)pathp, FMODE_READ);
 	if (handle) {
 		bdevp = handle->bdev;
 		rdev = bdevp->bd_inode->i_rdev;
 		close_bdev_handle(handle);
-	}
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	filp = inm_file_open_by_dev_path((char *)pathp, FMODE_READ);
+	if (filp) {
+		bdevp = file_bdev(filp);
+		rdev = bdevp->bd_inode->i_rdev;
+		close_file(filp);
 #else
 	bdevp = open_by_dev_path((char *)pathp, 0);
 	if (bdevp) {
 		rdev = bdevp->bd_inode->i_rdev;
 		close_bdev(bdevp, FMODE_READ);
-	}
 #endif
+	}
+
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("leaving path:%s rdev:%d", pathp,rdev);
 	}
@@ -975,7 +1043,7 @@ inm_u64_t
 inm_dev_size_get(target_context_t *ctx)
 {
 	host_dev_ctx_t		*hdcp;
-	target_volume_ctx_t	*tvcptr;
+	target_volume_ctx_t	*tvcptr;	
 
 	switch(ctx->tc_dev_type) {
 		 case FILTER_DEV_HOST_VOLUME:
@@ -1049,7 +1117,7 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -1061,7 +1129,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(SLES15SP6)
 	 struct gendisk *disk = NULL;
 #endif
 	 struct scsi_device *sdp = NULL;
@@ -1069,9 +1137,9 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 if(is_AT_blocked()){
 		 err = -EACCES;
 		 goto out;
-	 }
+	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
@@ -1079,7 +1147,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(SLES15SP6)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
@@ -1153,7 +1221,7 @@ void inm_rel_dev_resources(target_context_t *ctx, host_dev_ctx_t *hdcp)
 
 		if (hdc_dev->hdc_fops)
 			unregister_disk_change_notification(ctx, hdc_dev);
-
+		
 		if (hdc_dev->hdc_req_q_ptr)
 			put_qinfo(hdc_dev->hdc_req_q_ptr);
 		hdc_dev->hdc_req_q_ptr = NULL;
@@ -1170,7 +1238,7 @@ void inm_rel_dev_resources(target_context_t *ctx, host_dev_ctx_t *hdcp)
 
 #if defined(IDEBUG_MIRROR_IO)
 extern inm_s32_t inject_vendorcdb_err;
-#endif
+#endif 
 
 inm_s32_t
 inm_all_AT_cdb_send(target_context_t *tcp, unsigned char *cmd, inm_u32_t cmdlen,
@@ -1217,7 +1285,7 @@ restart:
 		error = inm_one_AT_cdb_send(bdev, cmd, cmdlen, rw, buf, buflen);
 #if defined(IDEBUG_MIRROR_IO)
 		if (inject_vendorcdb_err) {
-			error = 1;
+			error = 1;       
 			inject_vendorcdb_err = 0;
 		}
 #endif
@@ -1454,7 +1522,7 @@ queue_request_scsi(inm_block_device_t *bdev, unsigned char *cmd, inm_u32_t cmdle
 		goto out;
 	}
 	scsi_rq->sr_data_direction = DMA_TO_DEVICE;
-	scsi_wait_req(scsi_rq, cmd, buf, buflen, INM_WRITE_SCSI_TIMEOUT, 1);
+	scsi_wait_req(scsi_rq, cmd, buf, buflen, INM_WRITE_SCSI_TIMEOUT, 1);   
 	error = scsi_rq->sr_result;
 
 out:
@@ -1470,7 +1538,7 @@ out:
 void
 inm_dma_flag(target_context_t *tcp, inm_u32_t *flag)
 {
-
+	
 	inm_block_device_t *bdev = NULL;
 	struct gendisk *bd_disk = NULL;
 	struct scsi_device *sdp = NULL;
@@ -1538,12 +1606,17 @@ print_AT_stat(target_context_t *tcp, char *page, inm_s32_t *len)
 		dbg("exiting");
 	}
 }
-
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 struct bdev_handle *
 inm_bdevhandle_open_by_devnum(dev_t dev, unsigned mode)
 {
 	return bdev_open_by_dev(dev, mode, NULL, NULL);
+}
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+struct file *
+inm_file_open_by_devnum(dev_t dev, unsigned mode)
+{
+	return bdev_file_open_by_dev(dev, mode, NULL, NULL);
 }
 #else
 struct block_device *
@@ -1629,7 +1702,8 @@ process_block_at_lun(inm_devhandle_t *handle, void * arg)
 			err = INM_ENOMEM;
 			goto out;
 		}
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED) || defined(INM_FILP_FOR_BDEV_ENABLED)
 		err = INM_EINVAL;
 		goto out;
 #else
@@ -1649,7 +1723,7 @@ process_block_at_lun(inm_devhandle_t *handle, void * arg)
 		if (disk && inm_get_parent_dev(disk)) {
 			sdp = to_scsi_device(inm_get_parent_dev(disk));
 			/* Not a InMage AT Lun ? */
-			if (strncmp(sdp->vendor, "InMage  ", strlen("InMage  "))) {
+			if (strncmp(sdp->vendor, "InMage  ", strlen("InMage  "))) { 
 				if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 					info("Entry is not an InMage AT device %s vendor:[%s]",
 					    at_lun_reconf->atdev_name,
@@ -1672,7 +1746,7 @@ process_block_at_lun(inm_devhandle_t *handle, void * arg)
 			/* Could come here for disk partition*/
 			dbg("Device %s already masked ",
 						at_lun_reconf->atdev_name);
-#ifndef INM_HANDLE_FOR_BDEV_ENABLED
+#if !defined(INM_HANDLE_FOR_BDEV_ENABLED) && !defined(INM_FILP_FOR_BDEV_ENABLED)
 			close_bdev(dc_vol_entry->dc_at_dev, FMODE_WRITE);
 #endif
 			dc_vol_entry->dc_at_dev = NULL;
@@ -1697,7 +1771,7 @@ process_block_at_lun(inm_devhandle_t *handle, void * arg)
 				dbg("Entry already exist for device %s",
 						at_lun_reconf->atdev_name);
 			}
-#ifndef INM_HANDLE_FOR_BDEV_ENABLED
+#if !defined(INM_HANDLE_FOR_BDEV_ENABLED) && !defined(INM_FILP_FOR_BDEV_ENABLED)
 			close_bdev(dc_vol_entry->dc_at_dev, FMODE_WRITE);
 #endif
 			dc_vol_entry->dc_at_dev = NULL;
@@ -1780,7 +1854,7 @@ free_dc_vol_entry(dc_at_vol_entry_t *at_vol_entry)
 			at_vol_entry->dc_at_dev->bd_disk->fops =
 			driver_ctx->dc_at_lun.dc_at_drv_info.orig_dev_ops;
 		}
-#ifndef INM_HANDLE_FOR_BDEV_ENABLED
+#if !defined(INM_HANDLE_FOR_BDEV_ENABLED) && !defined(INM_FILP_FOR_BDEV_ENABLED)
 		close_bdev(at_vol_entry->dc_at_dev, FMODE_READ);
 #endif
 		at_vol_entry->dc_at_dev = NULL;
@@ -2007,7 +2081,7 @@ inm_s32_t
 end_timer(flt_timer_t *timer)
 {
 	if (timer->ft_task.flags == WITEM_TYPE_TIMEOUT) {
-		dbg("Shutting down the timer");
+		dbg("Shutting down the timer"); 
 		del_timer_sync(&timer->ft_timer);
 		timer->ft_task.flags = WITEM_TYPE_UNINITIALIZED;
 		return 0;
@@ -2019,12 +2093,12 @@ end_timer(flt_timer_t *timer)
 void
 start_timer(flt_timer_t *timer, int timeout_ms, timeout_t callback)
 {
-	init_work_queue_entry(&timer->ft_task);
+	init_work_queue_entry(&timer->ft_task); 
 
 	timer->ft_task.flags = WITEM_TYPE_TIMEOUT;
 	timer->ft_task.work_func = callback;
 	timer->ft_task.context = NULL;
-
+	
 	dbg("Starting cp timer with %d ms timeout at %lu", timeout_ms,
 					jiffies);
 
@@ -2043,13 +2117,13 @@ start_timer(flt_timer_t *timer, int timeout_ms, timeout_t callback)
 inm_s32_t
 end_cp_timer(void)
 {
-	if (driver_ctx->dc_cp != INM_CP_NONE) {
+	if (driver_ctx->dc_cp != INM_CP_NONE) { 
 		INM_BUG_ON(driver_ctx->dc_cp != INM_CP_NONE);
 		return -EINVAL;
 	}
 
 	INM_MEM_ZERO(driver_ctx->dc_cp_guid, sizeof(driver_ctx->dc_cp_guid));
-
+	
 	return end_timer(&cp_timer);
 }
 
@@ -2078,9 +2152,9 @@ commit_tags_v2(char *tag_guid, TAG_COMMIT_STATUS_T commit, int timedout)
 	inm_list_head_t *next= NULL;
 	target_context_t *tgt_ctxt = NULL;
 	int tag_committed = 0;
-
+	
 	INM_DOWN(&driver_ctx->dc_cp_mutex);
-
+	
 	dbg("Commit tag: flag = %d and timeout = %d", commit, timedout);
 
 	if (INM_MEM_CMP(driver_ctx->dc_cp_guid, tag_guid,     /* Tag Matches  */
@@ -2100,14 +2174,14 @@ commit_tags_v2(char *tag_guid, TAG_COMMIT_STATUS_T commit, int timedout)
 		error = -EINVAL;
 		goto out;
 	}
-
-	error = INM_TAG_SUCCESS;
+		   
+	error = INM_TAG_SUCCESS; 
 
 	INM_DOWN_READ(&(driver_ctx->tgt_list_sem));
 
 	inm_list_for_each_safe(cur, next, &driver_ctx->tgt_list) {
 		tgt_ctxt = inm_list_entry(cur, target_context_t, tc_list);
-		tag_committed = 0;
+		tag_committed = 0; 
 		if (is_target_tag_commit_pending(tgt_ctxt)) {
 
 			if (commit == TAG_COMMIT) {
@@ -2116,12 +2190,12 @@ commit_tags_v2(char *tag_guid, TAG_COMMIT_STATUS_T commit, int timedout)
 				if (commit_usertag(tgt_ctxt))
 				    error = INM_TAG_PARTIAL;
 				else
-				    tag_committed = 1;
+				    tag_committed = 1; 
 			} else {
 				dbg("Revoking tag");
 				revoke_usertag(tgt_ctxt, timedout);
 			}
-
+			
 			tgt_ctxt->tc_flags &= ~VCF_TAG_COMMIT_PENDING;
 
 			if (tag_committed || /* Committed */
@@ -2132,7 +2206,7 @@ commit_tags_v2(char *tag_guid, TAG_COMMIT_STATUS_T commit, int timedout)
 	}
 
 	INM_UP_READ(&(driver_ctx->tgt_list_sem));
-
+		
 	driver_ctx->dc_cp &= ~INM_CP_TAG_COMMIT_PENDING;
 	INM_BUG_ON(driver_ctx->dc_cp != INM_CP_NONE);
 
@@ -2205,12 +2279,22 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 		       			freeze_vol->vol_info->vol_name);
 
 	/* open by device path */
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	freeze_vinfo->handle = inm_bdevhandle_open_by_dev_path(freeze_vinfo->vol_name,
 						FMODE_READ | FMODE_WRITE);
 	if (freeze_vinfo->handle)
 	{
 		freeze_vinfo->bdev = freeze_vinfo->handle->bdev;
+	}
+	else
+	{
+		info ("failed to open block device handle %s", freeze_vinfo->vol_name);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	freeze_vinfo->filp = inm_file_open_by_dev_path(freeze_vinfo->vol_name,
+						FMODE_READ | FMODE_WRITE);
+	if (freeze_vinfo->filp)
+	{
+		freeze_vinfo->bdev = file_bdev(freeze_vinfo->filp);
 	}
 	else
 	{
@@ -2235,9 +2319,12 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 	if (inm_freeze_bdev(freeze_vinfo->bdev, freeze_vinfo->sb)) {
 		info (" failed to freeze block device %s",
 						freeze_vinfo->vol_name);
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(freeze_vinfo->handle);
 		freeze_vinfo->handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file (freeze_vinfo->filp);
+		freeze_vinfo->filp = NULL;
 #else
 		close_bdev (freeze_vinfo->bdev, FMODE_READ | FMODE_WRITE);
 #endif
@@ -2353,7 +2440,7 @@ process_freeze_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 
 	 /* If some fs were frozen earlier, match the guid */
 	if (driver_ctx->dc_cp != INM_CP_NONE) {
-		INM_BUG_ON(driver_ctx->dc_cp != INM_CP_APP_ACTIVE);
+		INM_BUG_ON(driver_ctx->dc_cp != INM_CP_APP_ACTIVE); 
 		if (INM_MEM_CMP(driver_ctx->dc_cp_guid, freeze_vol->tag_guid,
 				        sizeof(driver_ctx->dc_cp_guid))) {
 			err("GUID mismatch");
@@ -2418,7 +2505,7 @@ process_freeze_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 					sizeof(driver_ctx->dc_cp_guid),
 					freeze_vol->tag_guid,
 					sizeof(freeze_vol->tag_guid));
-			start_cp_timer(freeze_vol->timeout,
+			start_cp_timer(freeze_vol->timeout, 
 				           inm_fvol_list_thaw_on_timeout);
 		} else {
 			INM_BUG_ON(driver_ctx->dc_cp != INM_CP_APP_ACTIVE);
@@ -2489,9 +2576,12 @@ process_thaw_volume(thaw_info_t *thaw_vol)
 			 */
 
 			inm_thaw_bdev(freeze_ele->bdev, freeze_ele->sb);
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			close_bdev_handle (freeze_ele->handle);
 			freeze_ele->handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			close_file (freeze_ele->filp);
+			freeze_ele->filp = NULL;
 #else
 			close_bdev (freeze_ele->bdev, FMODE_READ | FMODE_WRITE);
 #endif
@@ -2684,7 +2774,7 @@ inm_fvol_list_thaw_on_timeout(wqentry_t *not_used)
 	freeze_vol_info_t    *freeze_ele = NULL;
 
 	err("Starting timeout procedure at %lu", jiffies);
-
+	
 	/* take the freezevol lock to ensure thaw proceeds without blocking for dc_cp_mutex */
 	INM_DOWN(&(driver_ctx->dc_freezevol_mutex));
 
@@ -2698,9 +2788,12 @@ inm_fvol_list_thaw_on_timeout(wqentry_t *not_used)
 			 * list
 			 */
 			inm_thaw_bdev(freeze_ele->bdev, freeze_ele->sb);
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			close_bdev_handle (freeze_ele->handle);
 			freeze_ele->handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+			close_file (freeze_ele->filp);
+			freeze_ele->filp = NULL;
 #else
 			close_bdev (freeze_ele->bdev, FMODE_READ | FMODE_WRITE);
 #endif
@@ -2819,7 +2912,7 @@ iobarrier_add_volume_tags(tag_volinfo_t *tag_volinfop,
 		if (tag_common) {
 			if (tag_hist)
 				telemetry_tag_history_record(ctxt, tag_hist);
-			else
+			else 
 				telemetry_log_drop_error(-ENOMEM);
 		}
 	}
@@ -3377,7 +3470,7 @@ remove_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len)
 	INM_DOWN(&driver_ctx->dc_cp_mutex);
 
 	dbg("removing io barrier\n");
-
+	
 	if (driver_ctx->dc_cp & INM_CP_CRASH_ACTIVE) {
 
 		dbg("crash consistency on");
@@ -3438,10 +3531,10 @@ create_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len, int timeout_ms)
 
 	INM_DOWN(&driver_ctx->dc_cp_mutex);
 
-	if (driver_ctx->dc_cp == INM_CP_NONE) {
+	if (driver_ctx->dc_cp == INM_CP_NONE) { 
 		/* Stop all IO */
 		INM_DOWN_WRITE(&(driver_ctx->tgt_list_sem));
-
+   
 		if (!driver_ctx->total_prot_volumes) {
 			dbg("No protected volumes");
 			error = -ENODEV;
@@ -3479,7 +3572,7 @@ create_io_barrier_all(char *tag_guid, inm_s32_t tag_guid_len, int timeout_ms)
 		start_cp_timer(timeout_ms, barrier_all_timeout);
 		dbg("created io barrier\n");
 		dbg("New cp state = %d", driver_ctx->dc_cp);
-
+	
 	} else {
 		err("Barrier already present");
 		error = -EAGAIN;
@@ -3631,19 +3724,24 @@ out:
 	return error;
 }
 
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED) || defined(INM_FILP_FOR_BDEV_ENABLED)
 inm_s32_t
 freeze_root_dev(void)
 {
 	inm_s32_t error = 0;
 	inm_block_device_t *rbdev;
 	inm_super_block_t *rsb;
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	struct file *rfilp;
+#endif
 
 	dbg("Freezing root");
 	if (!driver_ctx->root_dev)
 		return -ENODEV;
 
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	handle = inm_bdevhandle_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 	if (IS_ERR(handle)) {
 		error = PTR_ERR(handle);
@@ -3654,6 +3752,18 @@ freeze_root_dev(void)
 		if (!error)
 			inm_thaw_bdev(rbdev, rsb);
 		close_bdev_handle(handle);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	rfilp = inm_file_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
+	if (IS_ERR(rfilp)) {
+		error = PTR_ERR(rfilp);
+	}
+	else {
+		rbdev = file_bdev(rfilp);
+		error = inm_freeze_bdev(rbdev, rsb);
+		if (!error)
+			inm_thaw_bdev(rbdev, rsb);
+		close_file(rfilp);
+#endif
 	}
 
 	return error;
@@ -3674,7 +3784,7 @@ freeze_root_dev(void)
 	rbdev = inm_open_by_devnum(driver_ctx->root_dev, FMODE_READ);
 	if (!IS_ERR(rbdev)) {
 		error = inm_freeze_bdev(rbdev, rsb);
-		if (!error)
+		if (!error) 
 			inm_thaw_bdev(rbdev, rsb);
 		close_bdev(rbdev, FMODE_READ);
 	} else {
@@ -3738,7 +3848,7 @@ inm_s32_t
 __inm_unregister_reboot_notifier(struct notifier_block **nb)
 {
 	struct notifier_block *nblock = *nb;
-
+	
 	*nb = NULL;
 	info("Unregistered reboot notification");
 	return unregister_reboot_notifier(nblock);
@@ -3760,7 +3870,7 @@ inm_register_reboot_notifier(int reboot_notify)
 		return __inm_unregister_reboot_notifier(&nblock);
 	}
 }
-
+	
 void
 log_console(const char *fmt, ...)
 {
@@ -3781,7 +3891,7 @@ log_console(const char *fmt, ...)
 void
 inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 {
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	snprintf(name, INM_BDEVNAME_SIZE, "%pg", bdev);
 #else
 	bdevname(bdev, name);
@@ -3791,8 +3901,11 @@ inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 inm_s32_t
 inm_blkdev_get(inm_bio_dev_t *bdev)
 {
-#ifdef INM_HANDLE_FOR_BDEV_ENABLED
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	return (IS_ERR(bdev_open_by_dev(bdev->bd_dev,
+			FMODE_READ | FMODE_WRITE, NULL, NULL)) ? 1: 0);
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+	return (IS_ERR(bdev_file_open_by_dev(bdev->bd_dev,
 			FMODE_READ | FMODE_WRITE, NULL, NULL)) ? 1: 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
