@@ -290,7 +290,7 @@ INM_IS_SUPPORTED_REQUEST_OP(struct bio *bio)
  * For unsupported kernels, break build so we are forced to verify 
  * we are logging the right data.
  */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,9,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0))
 #define INM_BIO_RW_FLAGS(bio)   (*bio = 0)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)) || defined SLES12SP3
 #define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) | bio->bi_flags) 

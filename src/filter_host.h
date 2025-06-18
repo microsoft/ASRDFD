@@ -117,7 +117,12 @@ do{                                                                     \
 }while(0)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0) || defined SET_INM_QUEUE_FLAG_STABLE_WRITE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0) || defined(RHEL9_6)
+#define	INM_QUEUE_FEATURES(q)	((q)->limits.features)
+#define	SET_STABLE_PAGES(q)	(INM_QUEUE_FEATURES(q) |= BLK_FEAT_STABLE_WRITES)
+#define	CLEAR_STABLE_PAGES(q)	(INM_QUEUE_FEATURES(q) &= ~BLK_FEAT_STABLE_WRITES)
+#define	TEST_STABLE_PAGES(q)	(INM_QUEUE_FEATURES(q) & BLK_FEAT_STABLE_WRITES)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0) || defined SET_INM_QUEUE_FLAG_STABLE_WRITE
 #define	SET_STABLE_PAGES(q)	blk_queue_flag_set(QUEUE_FLAG_STABLE_WRITES, q)
 #define CLEAR_STABLE_PAGES(q)	blk_queue_flag_clear(QUEUE_FLAG_STABLE_WRITES, q)
 #define TEST_STABLE_PAGES(q)	blk_queue_stable_writes(q)

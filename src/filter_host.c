@@ -213,7 +213,7 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
 #else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
@@ -333,7 +333,7 @@ void init_tc_kobj(req_queue_info_t *q_info, inm_block_device_t *bdev,
 		} 
 		(void)xchg(&bdev->bd_disk->kobj.kset->ktype->release, 
 				  &flt_disk_obj_rel);
-		*hdc_disk_kobj_ptr = &bdev->bd_disk->kobj;
+		*hdc_disk_kobj_ptr = &bdev->bd_disk->kobj;    
 	} else {
 		if(flt_part_release_fn == NULL) {
 			INM_BUG_ON(bdev->bd_part->kobj.ktype == NULL);
@@ -364,7 +364,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
@@ -382,8 +382,8 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	q_info->orig_make_req_fn = q->make_request_fn;
 #endif
 	q_info->q = q;
-
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	if (q->disk->queue_kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
@@ -403,7 +403,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
 #else
 	q_info->orig_kobj_type =  q->kobj.ktype;
@@ -420,7 +420,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
 #else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
@@ -470,7 +470,8 @@ dump_bio(struct bio *bio)
 	err("bio->bi_vcnt: %d", bio->bi_vcnt);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)
-	bvec = &vec;
+	bvec = &vec;        
+	
 	if (bio->bi_end_io == flt_end_io_fn && info) { /* end io */
 		INM_BVEC_ITER_IDX(iter) = info->bi_idx;
 		INM_BVEC_ITER_SECTOR(iter) = info->bi_sector;
@@ -480,11 +481,11 @@ dump_bio(struct bio *bio)
 		INM_BVEC_ITER_SECTOR(iter) = INM_BUF_SECTOR(bio);
 		INM_BVEC_ITER_SZ(iter) = INM_BUF_COUNT(bio);
 	}
-
+	
 	INM_BVEC_ITER_BVDONE(iter) =  INM_BVEC_ITER_BVDONE(INM_BUF_ITER(bio));
 
 	idx = iter; /* structure assignment */
-
+	
 	__bio_for_each_segment(vec, bio, idx, iter) 
 #else
 	__bio_for_each_segment(bvec, bio, idx, info->bi_idx) 
@@ -493,7 +494,7 @@ dump_bio(struct bio *bio)
 		err("bio->bv_page[%d]: %p", vcnt, bvec->bv_page);
 		err("bio->bv_len[%d]: %u", vcnt, bvec->bv_len);
 		err("bio->bv_offset[%d]: %u", vcnt, bvec->bv_offset);
-
+		
 		vcnt++;
 	}
 }
@@ -502,20 +503,20 @@ void
 inm_handle_bad_bio(target_context_t *tgt_ctxt, inm_buf_t *bio)
 {
 	static int print_once = 0;
-
+	
 	telemetry_set_exception(tgt_ctxt->tc_guid, ecUnsupportedBIO,
 						 INM_BIO_RW_FLAGS(bio));
 
 	queue_worker_routine_for_set_volume_out_of_sync(tgt_ctxt,
 				ERROR_TO_REG_UNSUPPORTED_IO, -EOPNOTSUPP);
-
+	
 	/* dont flood the syslog */
 	if (print_once)
 		return;
 
 	dump_bio(bio);
 	dump_stack();
-
+			
 	print_once = 1;
 
 }
@@ -537,7 +538,7 @@ copy_vec_to_data_pages(target_context_t *tgt_ctxt, struct bio_vec *bvec,
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_META))){
 		info("entered");
-	}
+	}    
 
 	pg_offset = 0;
 	node = inm_list_entry(change_node_list, change_node_t, next);
@@ -648,7 +649,7 @@ copy_vec_to_data_pages(target_context_t *tgt_ctxt, struct bio_vec *bvec,
 				 "seg_offset = %d pg_rem = %d", 
 				 *bytes_res_node, to_copy, seg_rem, 
 				 seg_offset, pg_rem); 
-
+	
 			print_once = 1;
 		}
 
@@ -682,7 +683,7 @@ copy_no_vector_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 	inm_s32_t bytes_res_node = 0;
 
 	dbg("Write Zeroes: %u", wdatap->wd_cplen);
-
+	
 	if (!(INM_IS_BIO_WOP(bio, INM_REQ_DISCARD) ||
 			INM_IS_BIO_WOP(bio, INM_REQ_WRITE_ZEROES))) {
 		inm_handle_bad_bio(tgt_ctxt, bio);
@@ -704,7 +705,7 @@ copy_no_vector_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 	vec.bv_offset = 0;
 
 	orglen = iolen = wdatap->wd_cplen;
-
+	
 	node = inm_list_entry(change_node_list, change_node_t, next);
 	bytes_res_node = node->data_free;
 
@@ -764,7 +765,7 @@ copy_single_vector_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 				  wdatap, change_node_list, &bytes_res_node);
 		iolen -= wdatap->wd_cplen;
 	}
-
+	
 	wdatap->wd_cplen = orglen;
 }
 
@@ -791,7 +792,7 @@ copy_normal_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_META))){
 		info("entered");
-	}
+	}    
 
 	pg_offset = 0;
 	node = inm_list_entry(change_node_list, change_node_t, next);
@@ -925,7 +926,7 @@ copy_normal_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 				 "seg_offset = %d pg_rem = %d", 
 				 bytes_res_node, to_copy, seg_rem, 
 				 seg_offset, pg_rem); 
-
+		
 			print_once=1;
 		}
 
@@ -982,7 +983,7 @@ flt_copy_bio(struct bio *bio)
 	dm_bio_info_t *bio_info = bio->bi_private;
 	target_context_t *ctxt;
 	host_dev_ctx_t *hdcp;
-	write_metadata_t wmd;
+	write_metadata_t wmd;     
 	inm_wdata_t wdata = {0};
 
 	INM_BUG_ON(!bio_info);
@@ -1019,7 +1020,7 @@ flt_copy_bio(struct bio *bio)
 					ecWOSChangeReasonUnsupportedBIO);
 			}
 		}
-
+	
 		involflt_completion(ctxt, &wmd, &wdata, FALSE);
 		bio_info->bi_chg_node = wdata.wd_chg_node;
 	}
@@ -1068,9 +1069,9 @@ flt_end_io_parent(struct bio *bio, target_context_t *ctxt, inm_s32_t error)
 
 	local_irq_save(flags);
 	cpuid = smp_processor_id();
-
+	
 	on_child_stack = bio_to_complete[cpuid];
-
+	
 	if (on_child_stack) {
 		INM_ATOMIC_INC(&ctxt->tc_nr_completed_in_child_stack);
 		bio_to_complete[cpuid] = bio;
@@ -1090,7 +1091,7 @@ flt_end_io_chain(struct bio *bio, inm_s32_t error)
 	inm_irqflag_t flags;
 	int cpuid = 0;
 	struct bio *obio = NULL;
-
+	
 	local_irq_save(flags);
 	cpuid = smp_processor_id();
 
@@ -1122,7 +1123,7 @@ flt_end_io_chain(struct bio *bio, inm_s32_t error)
 		* for the child endio() to call flt_orig_endio() on the parent bio
 		* an complete its processing in its stack and not let the stack grow.
 		*/
-
+		
 		if (bio != bio_to_complete[cpuid]) {
 			dbg("CHILD: Bio from parent(%d): %p -> %p", 
 					cpuid, bio, 
@@ -1152,7 +1153,7 @@ flt_end_io(struct bio *bio, inm_s32_t error)
 	int is_chain_bio = bio_info->dm_bio_flags & BINFO_FLAG_CHAIN;
 
 	flt_copy_bio(bio);
-
+	
 	if (!driver_ctx->tunable_params.enable_chained_io)
 		return flt_orig_endio(bio, error);
 
@@ -1235,7 +1236,7 @@ flt_end_io_fn(struct bio *bio, inm_u32_t done, inm_s32_t error)
 
 	if (bio->bi_end_io)
 		return bio->bi_end_io(bio, done, error);
-
+	
 	return 0;
 }
 
@@ -1275,7 +1276,7 @@ inm_capture_in_metadata(target_context_t *ctx, struct bio *bio,
 		inm_free_change_node(chg_node);
 	}
 }
-
+	
 static_inline void
 flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info, 
 							struct bio *bio)
@@ -1403,7 +1404,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 	 */
 	bio->bi_private = (void *)*bio_info;
 	bio->bi_end_io = flt_end_io_fn;
-
+	
 	if (INM_IS_CHAINED_BIO(bio)) {
 	INM_ATOMIC_INC(&ctx->tc_nr_chain_bios_submitted);
 	INM_ATOMIC_INC(&ctx->tc_nr_chain_bios_pending);
@@ -1434,7 +1435,7 @@ out_err:
 	}
 #ifdef INM_QUEUE_RQ_ENABLED
 	inm_free_bio_info(*bio_info);
-#else
+#else    
 	INM_MEMPOOL_FREE(*bio_info, hdcp->hdc_bio_info_pool);
 #endif
 	*bio_info = NULL;
@@ -1451,7 +1452,7 @@ get_root_disk(struct bio *bio)
 	ctx = get_tgt_ctxt_from_bio(bio);
 	if (ctx) {
 		volume_lock(ctx);
-
+	
 		if (!(ctx->tc_flags & 
 				(VCF_VOLUME_DELETING | VCF_VOLUME_CREATING)) &&
 				!(ctx->tc_flags & VCF_ROOT_DEV)) {
@@ -1542,9 +1543,9 @@ is_our_io(struct bio *biop)
 				  			t_inma_opsp, a_opsp);
 		if (driver_ctx->dc_lcw_aops == t_inma_opsp)
 				fstream_raw_map_bio(biop);
-
+		
 		/* If TrackRecursiveWrites is set, return FALSE */
-		return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;
+		return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;    
 	}
 
 	return FALSE;
@@ -1888,7 +1889,7 @@ blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6)  || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&q->kobj);
@@ -2328,7 +2329,7 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	qkobj = &disk->queue_kobj;
 #else
 	qkobj = &disk->queue->kobj;
@@ -2589,6 +2590,8 @@ stack_host_dev(target_context_t *ctx, inm_dev_extinfo_t *dinfo)
 	struct inm_list_head *ptr1, *ptr2;
 	host_dev_t *hdc_dev = NULL;
 	mirror_vol_entry_t *vol_entry = NULL;
+	struct inode* bd_inode = NULL;
+	sector_t capacity = 0;
 #if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	struct bdev_handle *handle;
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
@@ -2679,7 +2682,12 @@ retry:
 					&hdcp->hdc_dev_list_head) {
 				hdc_dev = inm_list_entry(ptr2, 
 					host_dev_t, hdc_dev_list);
-				if (hdc_dev->hdc_dev == bdev->bd_inode->i_rdev)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,10,0)
+				bd_inode = filp->f_mapping->host;
+#else
+				bd_inode = bdev->bd_inode;
+#endif
+				if (hdc_dev->hdc_dev == bd_inode->i_rdev)
 					break;
 				hdc_dev = NULL;
 			}
@@ -2702,9 +2710,11 @@ retry:
 						&hdcp->hdc_dev_list_head) {
 					hdc_dev = inm_list_entry(ptr2, 
 						host_dev_t, hdc_dev_list);
-					if (hdc_dev->hdc_dev == 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,10,0)
+					if (hdc_dev->hdc_dev ==
 						vol_entry->mirror_dev->bd_inode->i_rdev)
 						break;
+#endif
 					hdc_dev = NULL;
 				}
 				if (hdc_dev) {
@@ -2735,6 +2745,8 @@ retry:
 				INM_BUG_ON(1);
 				ret = -EINVAL;
 	}
+	// get actual capacity of disk
+	capacity = get_capacity(bdev->bd_disk);
 #if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 	close_bdev_handle(handle);
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
@@ -2764,6 +2776,17 @@ retry:
 	/* get volume size */
 	hdcp->hdc_volume_size = hdcp->hdc_bsize * hdcp->hdc_nblocks;
 	hdcp->hdc_end_sect = hdcp->hdc_start_sect + (hdcp->hdc_volume_size >> 9) - 1;
+
+	hdcp->hdc_actual_end_sect = hdcp->hdc_start_sect +
+					capacity - 1;
+	if (hdcp->hdc_end_sect != hdcp->hdc_actual_end_sect) {
+		err("%s : Disk size, Expected: %llu, Provided: %llu, proceeding with %llu",
+			ctx->tc_guid, (inm_u64_t)hdcp->hdc_actual_end_sect,
+			(inm_u64_t)hdcp->hdc_end_sect, (inm_u64_t)hdcp->hdc_actual_end_sect);
+		inm_u64_t hdc_act_nblocks = hdcp->hdc_actual_end_sect + 1;
+		hdcp->hdc_volume_size = hdcp->hdc_bsize * hdc_act_nblocks;
+		hdcp->hdc_end_sect = hdcp->hdc_actual_end_sect;
+	}
 
 	volume_lock(ctx);
 	char nvme_device[] = "/dev/nvme";
