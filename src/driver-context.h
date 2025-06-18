@@ -335,7 +335,7 @@ typedef struct _driver_context {
 
 	/* To protect freeze_vol_list */
 	inm_sem_t         dc_freezevol_mutex;
-
+	
 	/* flag to maintain the state of driver with io barrier */
 	inm_atomic_t      is_iobarrier_on;
 	/* Consistency Point State      */

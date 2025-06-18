@@ -1336,7 +1336,7 @@ fs_freeze_volume(target_context_t *ctxt, struct inm_list_head *head)
 			INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);
 			break;
 		}
-#endif		
+#endif
 		inm_freeze_bdev(vinfo->bdev, vinfo->sb);
 		success++;
 		inm_list_add_tail(&vinfo->next, head);
@@ -1383,7 +1383,7 @@ thaw_volume(target_context_t *ctxt, struct inm_list_head *head)
 		close_bdev_handle(vinfo->handle);
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
 		close_file(vinfo->filp);
-#else		
+#else
 		close_bdev(vinfo->bdev, FMODE_READ | FMODE_WRITE);
 #endif	
 		INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);

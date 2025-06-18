@@ -33,7 +33,7 @@ ifeq (, $(VERSION_MINOR))
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
-	VERSION_BUILDNUM:=4
+	VERSION_BUILDNUM:=5
 endif
 
 ifeq (, $(VERSION_PRIVATE))
@@ -72,7 +72,7 @@ endif
 
 ifeq ($(findstring ubuntu, $(VENDOR)), ubuntu)
 	DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
-			grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
+		    	grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
 			cut -d"." -f 1)
 	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
 endif
@@ -181,6 +181,10 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 
 	ifeq ($(findstring 5.14.0-503, $(KDIR)), 5.14.0-503)
 		EXTRA_CFLAGS += -DRHEL9_5
+	endif
+
+	ifeq ($(findstring 5.14.0-570, $(KDIR)), 5.14.0-570)
+		EXTRA_CFLAGS += -DRHEL9_6
 	endif
 
 	ifeq ($(findstring uek, $(KDIR)), uek)

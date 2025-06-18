@@ -72,7 +72,7 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -356,7 +356,12 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 						INM_KM_SLEEP, INM_KERNEL_HEAP);
 			INM_MEM_ZERO(hdc_dev, sizeof(host_dev_t));
 			if (hdc_dev) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,10,0)
+				struct inode *bd_inode = filp->f_mapping->host;
+				hdc_dev->hdc_dev = bd_inode->i_rdev;
+#else
 				hdc_dev->hdc_dev = bdev->bd_inode->i_rdev;
+#endif
 				hdc_dev->hdc_disk_ptr = bdev->bd_disk;
 				inm_list_add_tail(&hdc_dev->hdc_dev_list,
 					&((*hdcp)->hdc_dev_list_head));
@@ -437,7 +442,9 @@ dev_validate(inm_dev_extinfo_t *dev_info, host_dev_ctx_t **hdcp)
 				                                       INM_KM_SLEEP, INM_KERNEL_HEAP);
 					INM_MEM_ZERO(hdc_dev, sizeof(host_dev_t));
 					if (hdc_dev) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,10,0)
 						hdc_dev->hdc_dev = vol_entry->mirror_dev->bd_inode->i_rdev;
+#endif
 						hdc_dev->hdc_disk_ptr = vol_entry->mirror_dev->bd_disk;
 						inm_list_add_tail(&hdc_dev->hdc_dev_list,
 								  &((*hdcp)->hdc_dev_list_head));
@@ -895,6 +902,7 @@ inm_dev_id_get(target_context_t *ctx)
 		else {
 			/* crash in debug build if target context is without devt */
 			INM_BUG_ON(1);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,10,0)
 #if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 			handle = inm_bdevhandle_open_by_dev_path(ctx->tc_guid, FMODE_READ);
 			if (handle) {
@@ -918,6 +926,7 @@ inm_dev_id_get(target_context_t *ctx)
 			else {
 				return -ENODEV;
 			}
+#endif
 		}
 		break;
 
@@ -1008,6 +1017,7 @@ inm_get_dev_t_from_path(const char *pathp)
 	struct bdev_handle *handle = NULL;
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
 	struct file *filp = NULL;
+	struct inode *bd_inode = NULL;
 #endif
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
@@ -1023,7 +1033,12 @@ inm_get_dev_t_from_path(const char *pathp)
 	filp = inm_file_open_by_dev_path((char *)pathp, FMODE_READ);
 	if (filp) {
 		bdevp = file_bdev(filp);
-		rdev = bdevp->bd_inode->i_rdev;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,10,0)
+		bd_inode = filp->f_mapping->host;
+#else
+		bd_inode = bdevp->bd_inode;
+#endif
+		rdev = bd_inode->i_rdev;
 		close_file(filp);
 #else
 	bdevp = open_by_dev_path((char *)pathp, 0);
@@ -1117,7 +1132,7 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -1129,7 +1144,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(SLES15SP6)
 	 struct gendisk *disk = NULL;
 #endif
 	 struct scsi_device *sdp = NULL;
@@ -1139,7 +1154,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 		 goto out;
 	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
@@ -1147,7 +1162,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(SLES15SP6)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
@@ -3891,7 +3906,7 @@ log_console(const char *fmt, ...)
 void
 inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 {
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	snprintf(name, INM_BDEVNAME_SIZE, "%pg", bdev);
 #else
 	bdevname(bdev, name);

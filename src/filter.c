@@ -446,10 +446,10 @@ do_start_filtering(inm_devhandle_t *idhp, inm_dev_extinfo_t *dev_infop)
 		break;
 		case FILTER_DEV_FABRIC_LUN:
 #ifdef INM_LINUX
-		INM_BUG_ON(1);
-		r = INM_EINVAL;
-		err("Device:%s incorrectly sent as source device for AT LUN",
-			dev_infop->d_guid);
+			INM_BUG_ON(1);
+			r = INM_EINVAL;
+			err("Device:%s incorrectly sent as source device for AT LUN",
+				dev_infop->d_guid);
 #else
 		INM_BUG_ON(1);
 #endif
@@ -970,7 +970,9 @@ do_start_mirroring(inm_devhandle_t *idhp, mirror_conf_info_t *mirror_infop)
 					if (hdc_dev) {
 #if (defined(INM_LINUX))
 						req_queue_info_t *q_info;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,10,0)
 						hdc_dev->hdc_dev = vol_entry2->mirror_dev->bd_inode->i_rdev;
+#endif
 						hdc_dev->hdc_disk_ptr = vol_entry2->mirror_dev->bd_disk;
 						volume_unlock(ctx);
 						q_info = alloc_and_init_qinfo(vol_entry2->mirror_dev, ctx);

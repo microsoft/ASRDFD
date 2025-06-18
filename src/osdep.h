@@ -83,7 +83,7 @@
 #include <linux/sched/signal.h>
 #endif
 
-#if defined(RHEL9_5)
+#if defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 #ifndef INM_FILP_FOR_BDEV_ENABLED
 #define INM_FILP_FOR_BDEV_ENABLED
 #endif
@@ -525,7 +525,7 @@ typedef struct completion		inm_completion_t;
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 #define INM_COMPLETE_AND_EXIT(event, val)				\
 		kthread_complete_and_exit(event, val)
 #else
@@ -941,7 +941,7 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #endif
 #endif
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 typedef struct {
     /* empty dummy */
 } mm_segment_t;
@@ -956,7 +956,7 @@ typedef struct {
 })
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) || defined(RHEL9_6)
 #define inm_freeze_bdev(__bdev, __sb)   bdev_freeze(__bdev)
 #define inm_thaw_bdev(__bdev, __sb)     bdev_thaw(__bdev)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)

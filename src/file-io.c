@@ -519,7 +519,7 @@ inm_mkdir(char *dir_name, inm_s32_t mode)
 				mode &= ~current->fs->umask;
 			dbg("Coming in inm_mkdir befor vfs_mkdir\n");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(SLES15SP6)
 			err = vfs_mkdir(mnt_idmap(nameidata.path.mnt),
 						nameidata.path.dentry->d_inode,
 						dir, mode);
@@ -633,7 +633,7 @@ __inm_unlink(const char * pathname, char *parent_path)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(SLES15SP6)
 				error = vfs_unlink(mnt_idmap(path.mnt),
 							parent_inode,
 							dentry, &deleg);

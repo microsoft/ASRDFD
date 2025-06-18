@@ -4168,7 +4168,7 @@ prepare_volume_list(char *buf, struct inm_list_head *list_head,
 #else
 			vol_entry->mirror_dev = open_by_dev_path(vol_entry->tc_mirror_guid, 1);
 			if (!vol_entry->mirror_dev || vol_entry->mirror_dev->bd_disk)  {
-#endif				
+#endif
 				err("Failed to open the volume:%s during boot time stacking",
 					vol_entry->tc_mirror_guid);
 				INM_KFREE(vol_entry, sizeof(mirror_vol_entry_t), INM_KERNEL_HEAP);
@@ -4184,10 +4184,10 @@ prepare_volume_list(char *buf, struct inm_list_head *list_head,
 				vol_entry->mirror_dev = file_bdev(vol_entry->mirror_filp);
 				if (!keep_device_open) {
 					close_file(vol_entry->mirror_filp);
-#else				
+#else
 				if (!keep_device_open) {
 					close_bdev(vol_entry->mirror_dev, FMODE_WRITE);
-#endif					
+#endif
 				}
 			}
 #else

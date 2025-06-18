@@ -75,7 +75,9 @@
 #endif
 
 /* RHEL */
-#if (defined redhat && DISTRO_VER == 9)
+#if (defined redhat && DISTRO_VER == 10)
+#define RHEL10
+#elif (defined redhat && DISTRO_VER == 9)
 #define RHEL9
 #elif (defined redhat && DISTRO_VER == 8)
 #define RHEL8
