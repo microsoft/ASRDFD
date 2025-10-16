@@ -83,6 +83,13 @@
 #include <linux/sched/signal.h>
 #endif
 
+// restrict the use of bi_size to newer kernels for RHEL 8 onwards only for now to reduce regression risk
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,18,0) && defined (RHEL8))
+#define HAVE_BI_ITER_BI_SIZE
+#else
+#define HAVE_BI_SIZE
+#endif
+
 #if defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 #ifndef INM_FILP_FOR_BDEV_ENABLED
 #define INM_FILP_FOR_BDEV_ENABLED
@@ -276,7 +283,7 @@ struct block_device *inm_open_by_devnum(dev_t, unsigned);
 #define close_bdev_handle(handle)    bdev_release(handle);
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
 #define close_file(filp)    fput(filp);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6) || defined(SLES15SP7)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
 #define close_bdev(bdev, mode)  blkdev_put(bdev, mode);
@@ -339,6 +346,8 @@ inm_s32_t inm_get_scsi_id(char *path);
 #define IOCTL_INMAGE_AT_LUN_QUERY           _IOWR(FLT_IOCTL, AT_LUN_QUERY_CMD, LUN_QUERY_DATA)
 #define IOCTL_INMAGE_VOLUME_UNSTACKING         _IOW(FLT_IOCTL, VOLUME_UNSTACKING_CMD, VOLUME_GUID)
 #define IOCTL_INMAGE_BOOTTIME_STACKING          _IO(FLT_IOCTL, BOOTTIME_STACKING_CMD)
+#define IOCTL_INMAGE_DUMP_DRIVER_STRUCTS                _IOWR(FLT_IOCTL, DUMP_DRIVER_STRUCTS, inm_u32_t)
+#define IOCTL_INMAGE_DBG_AS_ERR                  	_IOWR(FLT_IOCTL, DBG_AS_ERR, inm_u32_t)
 
 /* target context specific sections */
 struct _target_context *get_tgt_ctxt_from_bio(struct bio *);
@@ -402,15 +411,17 @@ typedef struct inma_ops inma_ops_t;
 /* Debug APIs
  */
 
-#define dbg(format, arg...) \
-	if(IS_DBG_ENABLED(inm_verbosity, INM_DEBUG_ONLY)){				\
-		printk(KERN_DEBUG "%s[%s:%d (DBG)]: " format "\n" , DRIVER_NAME , 	\
-			__FUNCTION__, __LINE__, ## arg);				\
-	}
-
 #define err(format, arg...) 								\
 	printk(KERN_ERR "%s[%s:%d (ERR)]: " format "\n" , DRIVER_NAME, __FUNCTION__ ,	\
 		__LINE__, ## arg)
+
+#define dbg(format, arg...) \
+	if (g_dbg_as_err) \
+            err(format, ## arg); \
+    else if(IS_DBG_ENABLED(inm_verbosity, INM_DEBUG_ONLY)){				\
+		printk(KERN_DEBUG "%s[%s:%d (DBG)]: " format "\n" , DRIVER_NAME , 	\
+			__FUNCTION__, __LINE__, ## arg);				\
+	}
 
 #define vol_err(tcxt, format, arg...)                                       		\
 	printk(KERN_ERR "%s[%s:%d (ERR)]: (%s:%s)" format "\n" , DRIVER_NAME,   	\

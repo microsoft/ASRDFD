@@ -51,6 +51,7 @@
 /* driver state */
 inm_s32_t inm_mod_state;
 inm_u32_t lcwModeOn;
+bool g_dbg_as_err = FALSE;
 
 #ifdef IDEBUG_MIRROR_IO
 inm_s32_t inject_atio_err = 0;
@@ -98,6 +99,7 @@ static struct kobj_type *part_ktype_ptr = NULL;
 void update_cur_dat_pg(change_node_t *, data_page_t *, int);
 data_page_t *get_cur_data_pg(change_node_t *node, inm_s32_t *offset);
 static void flt_end_io_chain(struct bio *bio, inm_s32_t error);
+void print_all_ioctl_values_with_err(void);
 
 inm_s32_t driver_state = DRV_LOADED_FULLY;
 
@@ -839,11 +841,11 @@ copy_normal_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 #endif
 		dbg("Vec = %p", bvec);
 		seg_offset = bvec->bv_offset;
-		seg_rem = MIN(bvec->bv_len, bytes_to_copy);
+		seg_rem = MIN(bvec->bv_len, bytes_to_copy); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 		src = INM_KMAP_ATOMIC(bvec->bv_page, KM_SOFTIRQ0);
 		while (seg_rem) {
-			to_copy = MIN(seg_rem, pg_rem);
-			to_copy = MIN(to_copy, bytes_res_node);
+			to_copy = MIN(seg_rem, pg_rem); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+			to_copy = MIN(to_copy, bytes_res_node); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 			dbg("SPage = %p, SOffset = %d, DPage = %p, DOffset = %d copy = %d", 
 				 src, seg_offset, dst, pg_offset, 
 				 to_copy); 
@@ -1393,7 +1395,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 
 			(*bio_info)->bi_chg_node = chg_node;
 
-			length = min(max_data_sz_per_chg_node, remaining_length);
+			length = min(max_data_sz_per_chg_node, remaining_length); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 			remaining_length -= length;
 		}
 	}
@@ -1456,7 +1458,7 @@ get_root_disk(struct bio *bio)
 		if (!(ctx->tc_flags & 
 				(VCF_VOLUME_DELETING | VCF_VOLUME_CREATING)) &&
 				!(ctx->tc_flags & VCF_ROOT_DEV)) {
-			info("Root Disk - %s (%s)", ctx->tc_guid, 
+			err("Root Disk - %s (%s)", ctx->tc_guid, 
 								ctx->tc_pname);
 			driver_ctx->dc_root_disk = ctx;
 			ctx->tc_flags |= VCF_ROOT_DEV;
@@ -1477,11 +1479,26 @@ is_our_io(struct bio *biop)
 	inma_ops_t *t_inma_opsp = NULL;
 	struct address_space *mapping = NULL;
 	unsigned long lock_flag;
+	static inm_u64_t entryCount = 0;
+	bool logErr = false;
 
 	INM_BUG_ON(!biop);
 
+	entryCount++;
+	if (entryCount % 10000 == 0 || unlikely(!driver_ctx->dc_root_disk)) {
+		logErr = true;
+	}
+
+#if defined(HAVE_BI_ITER_BI_SIZE)
+    // For newer kernels with bi_iter.bi_size
+    size_t bio_size = biop->bi_iter.bi_size;
+#else
+    // For older kernels, keep using existing code with bi_vcnt to avoid any regressions
+    size_t bio_size = biop->bi_vcnt;
+#endif
+
 #if !(defined(RHEL_MAJOR) && (RHEL_MAJOR == 5))
-	if (!biop->bi_vcnt || INM_IS_OFFLOAD_REQUEST_OP(biop)) {
+	if (!bio_size || INM_IS_OFFLOAD_REQUEST_OP(biop)) {
 #if (defined (RHEL8) || defined (RHEL7))
 		if (unlikely(lcwModeOn &&
 				strcmp(current->comm, "inmshutnotify") == 0)) {
@@ -1491,28 +1508,75 @@ is_our_io(struct bio *biop)
 			return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;
 		}
 #endif
+		if (logErr) {
+			dbg("Invalid bio: %p, vcnt = %d, bi_size = %d", biop, biop->bi_vcnt, bio_size);
+		}
+
 		return FALSE;
 	}
 #endif
 
+	
 	bvecp = bio_iovec_idx(biop, INM_BUF_ITER(biop));
 	if(!bvecp || !bvecp->bv_page)
+	{
+		if (logErr) {
+			dbg("Invalid bio bvecp or bv_page: %p, bvecp = %p, bv_page = %p", 
+					biop, bvecp, (bvecp ? bvecp->bv_page : NULL));
+		}		
 		return FALSE;
-
+	}
 	if (!virt_addr_valid(bvecp) || 
 		!INM_VIRT_ADDR_VALID(INM_PAGE_TO_VIRT(bvecp->bv_page)))
+	{
+		if (logErr) {
+			dbg("Invalid bio virt_addr_valid(bvecp): %p, bvecp = %p, bv_page = %p", 
+					biop, bvecp, bvecp->bv_page);
+		}
 		return FALSE;
+	}
 
 	if (!bvecp->bv_page->mapping)
+	{
+		if (logErr) {
+			dbg("Invalid bio bvecp->bv_page->mapping: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
+	}
 
 	if (!virt_addr_valid(bvecp->bv_page->mapping))
+	{
+		if (logErr) {
+			dbg("Invalid bio virt_addr_valid: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
-
+	}
 	if (PageAnon(bvecp->bv_page))
+	{	
+		if (logErr) {	
+			dbg("Invalid bio PageAnon: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
+	}
 
 	mapping = bvecp->bv_page->mapping;
+
+	if (logErr) {
+		dbg("dc_root_disk=%p, virt_addr_valid(mapping->host)=%d, virt_addr_valid(mapping->host->i_sb)=%d, mapping->host->i_sb->s_dev=0x%lx, root_dev=0x%x, driver_state=0x%x, DRV_LOADED_FULLY=0x%x",
+			driver_ctx->dc_root_disk,
+			virt_addr_valid(mapping->host),
+			virt_addr_valid(mapping->host ? mapping->host->i_sb : NULL),
+			mapping->host && mapping->host->i_sb ? mapping->host->i_sb->s_dev : 0,
+			driver_ctx->root_dev,
+			driver_state,
+			DRV_LOADED_FULLY);
+	}
 
 	if (unlikely(!driver_ctx->dc_root_disk) &&
 		virt_addr_valid(mapping->host) &&
@@ -2272,8 +2336,10 @@ flt_disk_removal(struct kobject *kobj)
 						DEVICE_STATUS_REMOVED);
 	volume_unlock(ctx);
 	
-	if (driver_ctx->dc_root_disk == ctx)
+	if (driver_ctx->dc_root_disk == ctx) {
 		driver_ctx->dc_root_disk = NULL;
+		err("dc_root_disk set to NULL\n");
+	}
 
 	up_read(&(driver_ctx->tgt_list_sem));
 
@@ -2823,7 +2889,7 @@ inm_s32_t get_root_info(void)
 	driver_ctx->root_dev = f->f_dentry->d_sb->s_dev;
 #endif
 	filp_close(f, current->files);
-	dbg("Root dev_t = %u,%u", MAJOR(driver_ctx->root_dev), 
+	err("Root dev_t = %u,%u", MAJOR(driver_ctx->root_dev), 
 			MINOR(driver_ctx->root_dev));
 	return 0;
 }
@@ -3020,6 +3086,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 		err("Driver is being unloaded now");
 		return INM_EINVAL;
 	}
+
 
 	switch(cmd) {
 	case IOCTL_INMAGE_VOLUME_STACKING:
@@ -3229,7 +3296,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 							error);
 		break;
 
-	case IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST:
+	case IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST:		
 		error = process_get_protected_volume_list_ioctl(filp, 
 							(void __user*)arg);
 		dbg("IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST ioctl err = %d\n", 
@@ -3373,6 +3440,16 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 	case IOCTL_INMAGE_SET_DRAIN_STATE:
 		error = process_set_drain_state_ioctl(filp, (void __user*)arg);
 		dbg("IOCTL_INMAGE_SET_DRAIN_STATE err = %d\n", error);
+		break;
+
+	case IOCTL_INMAGE_DUMP_DRIVER_STRUCTS:
+        error = process_dump_driver_structs_ioctl(filp, (void __user*)arg);
+		dbg("IOCTL_INMAGE_DUMP_DRIVER_STRUCTS err = %d\n", error);
+		break;
+
+	case IOCTL_INMAGE_DBG_AS_ERR:
+    	error = process_dbg_as_err_ioctl(filp, (void __user*)arg);
+		dbg("IOCTL_INMAGE_DBG_AS_ERR err = %d\n", error);
 		break;
 
 	default:
@@ -3544,6 +3621,12 @@ inm_s32_t __init involflt_init(void)
 	info("Version - %u.%u.%u.%u", INMAGE_PRODUCT_VERSION_MAJOR, 
 		INMAGE_PRODUCT_VERSION_MINOR, INMAGE_PRODUCT_VERSION_PRIVATE,
 		INMAGE_PRODUCT_VERSION_BUILDNUM);
+
+#if 0
+	/* Print all the ioctl values with error codes */
+	/* This is useful for debugging purposes */
+	print_all_ioctl_values_with_err();
+#endif
 
 #ifdef INITRD_MODE 
 	if (!strcmp(in_initrd, "yes") || !strcmp(in_initrd, "YES"))
@@ -3812,6 +3895,80 @@ void
 inm_cleanup_mirror_bufinfo(host_dev_ctx_t *hdcp)
 {
 	return;
+}
+
+void print_all_ioctl_values_with_err(void) 
+{
+    err("IOCTL_INMAGE_VOLUME_STACKING:           0x%lx", (unsigned long)IOCTL_INMAGE_VOLUME_STACKING);
+    err("IOCTL_INMAGE_PROCESS_START_NOTIFY:      0x%lx", (unsigned long)IOCTL_INMAGE_PROCESS_START_NOTIFY);
+    err("IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY:   0x%lx", (unsigned long)IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY);
+    err("IOCTL_INMAGE_STOP_FILTERING_DEVICE:     0x%lx", (unsigned long)IOCTL_INMAGE_STOP_FILTERING_DEVICE);
+    err("IOCTL_INMAGE_REMOVE_FILTER_DEVICE:      0x%lx", (unsigned long)IOCTL_INMAGE_REMOVE_FILTER_DEVICE);
+    err("IOCTL_INMAGE_START_FILTERING_DEVICE:    0x%lx", (unsigned long)IOCTL_INMAGE_START_FILTERING_DEVICE);
+    err("IOCTL_INMAGE_START_FILTERING_DEVICE_V2: 0x%lx", (unsigned long)IOCTL_INMAGE_START_FILTERING_DEVICE_V2);
+    err("IOCTL_INMAGE_FREEZE_VOLUME:             0x%lx", (unsigned long)IOCTL_INMAGE_FREEZE_VOLUME);
+    err("IOCTL_INMAGE_THAW_VOLUME:               0x%lx", (unsigned long)IOCTL_INMAGE_THAW_VOLUME);
+    err("IOCTL_INMAGE_TAG_VOLUME_V2:             0x%lx", (unsigned long)IOCTL_INMAGE_TAG_VOLUME_V2);
+    err("IOCTL_INMAGE_IOBARRIER_TAG_VOLUME:      0x%lx", (unsigned long)IOCTL_INMAGE_IOBARRIER_TAG_VOLUME);
+    err("IOCTL_INMAGE_CREATE_BARRIER_ALL:        0x%lx", (unsigned long)IOCTL_INMAGE_CREATE_BARRIER_ALL);
+    err("IOCTL_INMAGE_REMOVE_BARRIER_ALL:        0x%lx", (unsigned long)IOCTL_INMAGE_REMOVE_BARRIER_ALL);
+    err("IOCTL_INMAGE_TAG_COMMIT_V2:             0x%lx", (unsigned long)IOCTL_INMAGE_TAG_COMMIT_V2);
+    err("IOCTL_INMAGE_START_MIRRORING_DEVICE:    0x%lx", (unsigned long)IOCTL_INMAGE_START_MIRRORING_DEVICE);
+    err("IOCTL_INMAGE_STOP_MIRRORING_DEVICE:     0x%lx", (unsigned long)IOCTL_INMAGE_STOP_MIRRORING_DEVICE);
+    err("IOCTL_INMAGE_MIRROR_VOLUME_STACKING:    0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_VOLUME_STACKING);
+    err("IOCTL_INMAGE_MIRROR_EXCEPTION_NOTIFY:   0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_EXCEPTION_NOTIFY);
+    err("IOCTL_INMAGE_MIRROR_TEST_HEARTBEAT:     0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_TEST_HEARTBEAT);
+    err("IOCTL_INMAGE_BLOCK_AT_LUN:              0x%lx", (unsigned long)IOCTL_INMAGE_BLOCK_AT_LUN);
+    err("IOCTL_INMAGE_GET_DIRTY_BLOCKS_TRANS_V2: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_DIRTY_BLOCKS_TRANS_V2);
+    err("IOCTL_INMAGE_COMMIT_DIRTY_BLOCKS_TRANS: 0x%lx", (unsigned long)IOCTL_INMAGE_COMMIT_DIRTY_BLOCKS_TRANS);
+    err("IOCTL_INMAGE_SET_VOLUME_FLAGS:          0x%lx", (unsigned long)IOCTL_INMAGE_SET_VOLUME_FLAGS);
+    err("IOCTL_INMAGE_GET_VOLUME_FLAGS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_FLAGS);
+    err("IOCTL_INMAGE_WAIT_FOR_DB:               0x%lx", (unsigned long)IOCTL_INMAGE_WAIT_FOR_DB);
+    err("IOCTL_INMAGE_CLEAR_DIFFERENTIALS:       0x%lx", (unsigned long)IOCTL_INMAGE_CLEAR_DIFFERENTIALS);
+    err("IOCTL_INMAGE_GET_NANOSECOND_TIME:       0x%lx", (unsigned long)IOCTL_INMAGE_GET_NANOSECOND_TIME);
+    err("IOCTL_INMAGE_UNSTACK_ALL:               0x%lx", (unsigned long)IOCTL_INMAGE_UNSTACK_ALL);
+    err("IOCTL_INMAGE_SYS_PRE_SHUTDOWN:          0x%lx", (unsigned long)IOCTL_INMAGE_SYS_PRE_SHUTDOWN);
+    err("IOCTL_INMAGE_SYS_SHUTDOWN:              0x%lx", (unsigned long)IOCTL_INMAGE_SYS_SHUTDOWN);
+    err("IOCTL_INMAGE_TAG_VOLUME:                0x%lx", (unsigned long)IOCTL_INMAGE_TAG_VOLUME);
+    err("IOCTL_INMAGE_SYNC_TAG_VOLUME:           0x%lx", (unsigned long)IOCTL_INMAGE_SYNC_TAG_VOLUME);
+    err("IOCTL_INMAGE_GET_TAG_VOLUME_STATUS:     0x%lx", (unsigned long)IOCTL_INMAGE_GET_TAG_VOLUME_STATUS);
+    err("IOCTL_INMAGE_WAKEUP_ALL_THREADS:        0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_ALL_THREADS);
+    err("IOCTL_INMAGE_GET_DB_NOTIFY_THRESHOLD:   0x%lx", (unsigned long)IOCTL_INMAGE_GET_DB_NOTIFY_THRESHOLD);
+    err("IOCTL_INMAGE_RESYNC_START_NOTIFICATION: 0x%lx", (unsigned long)IOCTL_INMAGE_RESYNC_START_NOTIFICATION);
+    err("IOCTL_INMAGE_RESYNC_END_NOTIFICATION:   0x%lx", (unsigned long)IOCTL_INMAGE_RESYNC_END_NOTIFICATION);
+    err("IOCTL_INMAGE_GET_DRIVER_VERSION:        0x%lx", (unsigned long)IOCTL_INMAGE_GET_DRIVER_VERSION);
+    err("IOCTL_INMAGE_SHELL_LOG:                 0x%lx", (unsigned long)IOCTL_INMAGE_SHELL_LOG);
+    err("IOCTL_INMAGE_AT_LUN_CREATE:             0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_CREATE);
+    err("IOCTL_INMAGE_AT_LUN_DELETE:             0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_DELETE);
+    err("IOCTL_INMAGE_AT_LUN_LAST_WRITE_VI:      0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_LAST_WRITE_VI);
+    err("IOCTL_INMAGE_AT_LUN_LAST_HOST_IO_TIMESTAMP: 0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_LAST_HOST_IO_TIMESTAMP);
+    err("IOCTL_INMAGE_AT_LUN_QUERY:              0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_QUERY);
+    err("IOCTL_INMAGE_GET_GLOBAL_STATS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_GLOBAL_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_STATS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_STATS);
+    err("IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST);
+    err("IOCTL_INMAGE_GET_SET_ATTR:              0x%lx", (unsigned long)IOCTL_INMAGE_GET_SET_ATTR);
+    err("IOCTL_INMAGE_GET_ADDITIONAL_VOLUME_STATS: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_ADDITIONAL_VOLUME_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_LATENCY_STATS:  0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_LATENCY_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_BMAP_STATS:     0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_BMAP_STATS);
+    err("IOCTL_INMAGE_SET_INVOLFLT_VERBOSITY:    0x%lx", (unsigned long)IOCTL_INMAGE_SET_INVOLFLT_VERBOSITY);
+    err("IOCTL_INMAGE_GET_MONITORING_STATS:      0x%lx", (unsigned long)IOCTL_INMAGE_GET_MONITORING_STATS);
+    err("IOCTL_INMAGE_GET_BLK_MQ_STATUS:         0x%lx", (unsigned long)IOCTL_INMAGE_GET_BLK_MQ_STATUS);
+    err("IOCTL_INMAGE_GET_VOLUME_STATS_V2:       0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_STATS_V2);
+    err("IOCTL_INMAGE_REPLICATION_STATE:         0x%lx", (unsigned long)IOCTL_INMAGE_REPLICATION_STATE);
+    err("IOCTL_INMAGE_NAME_MAPPING:              0x%lx", (unsigned long)IOCTL_INMAGE_NAME_MAPPING);
+    err("IOCTL_INMAGE_LCW:                       0x%lx", (unsigned long)IOCTL_INMAGE_LCW);
+    err("IOCTL_INMAGE_WAIT_FOR_DB_V2:            0x%lx", (unsigned long)IOCTL_INMAGE_WAIT_FOR_DB_V2);
+    err("IOCTL_INMAGE_INIT_DRIVER_FULLY:         0x%lx", (unsigned long)IOCTL_INMAGE_INIT_DRIVER_FULLY);
+    err("IOCTL_INMAGE_COMMITDB_FAIL_TRANS:       0x%lx", (unsigned long)IOCTL_INMAGE_COMMITDB_FAIL_TRANS);
+    err("IOCTL_INMAGE_GET_CXSTATS_NOTIFY:        0x%lx", (unsigned long)IOCTL_INMAGE_GET_CXSTATS_NOTIFY);
+    err("IOCTL_INMAGE_WAKEUP_GET_CXSTATS_NOTIFY_THREAD: 0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_GET_CXSTATS_NOTIFY_THREAD);
+    err("IOCTL_INMAGE_TAG_DRAIN_NOTIFY:          0x%lx", (unsigned long)IOCTL_INMAGE_TAG_DRAIN_NOTIFY);
+    err("IOCTL_INMAGE_WAKEUP_TAG_DRAIN_NOTIFY_THREAD: 0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_TAG_DRAIN_NOTIFY_THREAD);
+    err("IOCTL_INMAGE_MODIFY_PERSISTENT_DEVICE_NAME: 0x%lx", (unsigned long)IOCTL_INMAGE_MODIFY_PERSISTENT_DEVICE_NAME);
+    err("IOCTL_INMAGE_GET_DRAIN_STATE:           0x%lx", (unsigned long)IOCTL_INMAGE_GET_DRAIN_STATE);
+    err("IOCTL_INMAGE_SET_DRAIN_STATE:           0x%lx", (unsigned long)IOCTL_INMAGE_SET_DRAIN_STATE);
+    err("IOCTL_INMAGE_DUMP_DRIVER_STRUCTS:       0x%lx", (unsigned long)IOCTL_INMAGE_DUMP_DRIVER_STRUCTS);
+    err("IOCTL_INMAGE_DBG_AS_ERR:                0x%lx", (unsigned long)IOCTL_INMAGE_DBG_AS_ERR);
 }
 
 module_init(involflt_init);

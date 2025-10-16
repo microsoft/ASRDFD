@@ -86,4 +86,6 @@ inm_s32_t process_wakeup_tag_drain_notify_ioctl(inm_devhandle_t *handle, void *a
 inm_s32_t process_modify_persistent_device_name(inm_devhandle_t *handle, void *arg);
 inm_s32_t process_get_drain_state_ioctl(inm_devhandle_t *handle, void *arg);
 inm_s32_t process_set_drain_state_ioctl(inm_devhandle_t *handle, void *arg);
+inm_s32_t process_dump_driver_structs_ioctl(inm_devhandle_t *idhp, void *arg);
+inm_s32_t process_dbg_as_err_ioctl(inm_devhandle_t *idhp, void *arg);
 #endif /* _INM_FILTER_H */
