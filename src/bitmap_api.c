@@ -1132,8 +1132,8 @@ inm_s32_t move_rawio_changes_to_bitmap(bitmap_api_t *bapi,
 	/* now sweep through and save any last chance changes into bitmap */
 
 
-	max_nr_lcw = min(bapi->bitmap_header.un.header.last_chance_changes,
-			         (inm_u32_t)(MAX_WRITE_GROUPS_IN_BITMAP_HEADER * MAX_CHANGES_IN_WRITE_GROUP));
+	max_nr_lcw = min(bapi->bitmap_header.un.header.last_chance_changes, // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+			         (inm_u32_t)(MAX_WRITE_GROUPS_IN_BITMAP_HEADER * MAX_CHANGES_IN_WRITE_GROUP)); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 	info("%s: Last chance changes - %u", bapi->volume_name, max_nr_lcw);
 	for (i = 0; i < max_nr_lcw; i++) {
 		size_offset_pair = bapi->bitmap_header.change_groups[i /

@@ -2215,7 +2215,7 @@ inm_s32_t queue_worker_routine_for_bitmap_write(target_context_t *vcptr,
 			while (!inm_list_empty(&change_node->changes.md_pg_list)) {
 				inm_page_t *pgp = NULL;
 
-				nr_chgs = min((inm_u32_t)rem, (inm_u32_t)MAX_CHANGE_INFOS_PER_PAGE);
+				nr_chgs = min((inm_u32_t)rem, (inm_u32_t)MAX_CHANGE_INFOS_PER_PAGE); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 				pgp = inm_list_entry(change_node->changes.md_pg_list.next,inm_page_t, entry);
 				inm_list_del(&pgp->entry);

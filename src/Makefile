@@ -33,7 +33,7 @@ ifeq (, $(VERSION_MINOR))
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
-	VERSION_BUILDNUM:=5
+	VERSION_BUILDNUM:=6
 endif
 
 ifeq (, $(VERSION_PRIVATE))

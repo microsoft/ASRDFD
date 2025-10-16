@@ -1474,8 +1474,8 @@ inm_max_data_sz_dm_cn_store(const char *file_name, const char *buf, size_t len)
 
 	val = inm_atoi64(buf);
 	val *= (MEGABYTES);
-	val = max(val, (inm_u64_t)MIN_DATA_SZ_PER_CHANGE_NODE);
-	val = min(val, (inm_u64_t)MAX_DATA_SZ_PER_CHANGE_NODE);
+	val = max(val, (inm_u64_t)MIN_DATA_SZ_PER_CHANGE_NODE); // CodeQL [SM03932] max is using binary operator for comparison which is safe here
+	val = min(val, (inm_u64_t)MAX_DATA_SZ_PER_CHANGE_NODE); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 	sprintf((char *)buf, "%llu", ((inm_u64_t) val)/(MEGABYTES));
 
 	if (driver_ctx->dc_verifier_on) {

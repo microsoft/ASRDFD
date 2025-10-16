@@ -188,8 +188,8 @@ split_change_into_chg_node(target_context_t *vcptr, write_metadata_t *wmd,
 		inm_list_add_tail(&chg_node->next, split_chg_list_hd);
 		
 		INM_BUG_ON(remaining_length & ~SECTOR_SIZE_MASK);
-		wmd_local.length = min(max_data_sz_per_chg_node, 
-							remaining_length);
+		wmd_local.length = min(max_data_sz_per_chg_node, // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+							remaining_length); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 		wmd_local.length = wmd_local.length & SECTOR_SIZE_MASK;
 
 		update_change_node(chg_node, &wmd_local, &ts_delta);

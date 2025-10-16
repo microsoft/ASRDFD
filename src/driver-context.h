@@ -340,6 +340,13 @@ typedef struct _driver_context {
 	inm_atomic_t      is_iobarrier_on;
 	/* Consistency Point State      */
 	inm_u32_t         dc_cp;
+
+	/* Tells us if we are starting the first freeze of the volume */
+	bool         dc_firstfreeze_vol;
+	
+	/* Tells us if we the thaw timeout has already been triggered */
+	bool		 dc_thaw_timeout_triggered;
+
 	/* App/Crash consistency guid   */
 	char              dc_cp_guid[GUID_LEN];
 	/* To sync App/Crash consstency */

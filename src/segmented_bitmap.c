@@ -339,8 +339,8 @@ inm_u64_t segmented_bitmap_get_number_of_bits_set(segmented_bitmap_t *sb,
 		if (ret)
 			break;
 
-		adjusted_buffer_size = min(((inm_u64_t)bit_buffer_byte_size * 8) ,
-				   (sb->bits_in_bitmap - (byte_offset * 8)));
+		adjusted_buffer_size = min(((inm_u64_t)bit_buffer_byte_size * 8) , // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+				   (sb->bits_in_bitmap - (byte_offset * 8))); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 		if (bbsp) {
 			if ((byte_offset * 8 + 4096) >= sb->bits_in_bitmap) {

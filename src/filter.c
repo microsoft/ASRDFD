@@ -258,6 +258,19 @@ retry:
 				queue_worker_routine_for_set_volume_out_of_sync(ctx,
 						ERROR_TO_REG_UNCLEAN_SYS_BOOT,
 						LINVOLFLT_ERR_IN_SYNC);
+				#if 0
+					// set the root context if it is the root disk
+					if (strncmp(dev_info->d_pname, "RootDisk", INM_GUID_LEN_MAX) == 0) {
+						if (driver_ctx->dc_root_disk) {
+							err("Root disk already set to %s, cannot set again",
+								driver_ctx->dc_root_disk->tc_guid);
+						} else {
+							driver_ctx->dc_root_disk = ctx;
+							ctx->tc_flags |= VCF_ROOT_DEV;
+							info("Root disk set to %s", ctx->tc_guid);
+						}
+					}
+				#endif		
 			}
 #endif
 		}
@@ -315,6 +328,7 @@ retry:
 		inm_free_host_dev_ctx(hdcp);
 	}
 
+
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		info("do_volume_stacking: leaving err:%d", err);
 	}
@@ -361,8 +375,10 @@ retry:
 #ifdef INM_AIX
 		INM_SPIN_UNLOCK(&driver_ctx->tgt_list_lock, ipl);
 #endif
-		if (driver_ctx->dc_root_disk == tgt_ctxt)
+		if (driver_ctx->dc_root_disk == tgt_ctxt) {
 			driver_ctx->dc_root_disk = NULL;
+			err("do_unstack_all: set dc_root_disk to NULL\n");
+		}
 		INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
 
 		if(tgt_ctxt->tc_dev_type == FILTER_DEV_FABRIC_LUN)

@@ -442,7 +442,7 @@ fstream_raw_open(char *file, inm_u64_t offset, inm_u32_t len,
 	}
 
 	while (len) {
-		iosize = min(len, (inm_u32_t)PAGE_SIZE);
+		iosize = min(len, (inm_u32_t)PAGE_SIZE); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 		if (!flt_read_file(filp, buf, offset, iosize, &iodone) ||
 			iodone != iosize) {
@@ -527,7 +527,7 @@ fstream_raw_perform_block_io(inm_bio_dev_t *disk, char *buf, inm_u64_t offset,
 	}
 
 	if (!filp) {
-		snprintf(diskname, INM_PATH_MAX, "%s", INM_BDEVNAME_PREFIX);
+		snprintf(diskname, sizeof(diskname), "%s", INM_BDEVNAME_PREFIX);
 		inm_blkdev_name(disk, diskname + strlen(INM_BDEVNAME_PREFIX));
 
 		if (!flt_open_file(diskname, O_RDWR | O_SYNC, &filp)) {
@@ -570,7 +570,7 @@ fstream_raw_io(fstream_raw_hdl_t *hdl, char *buf, inm_u32_t len,
 
 		disk = (hdl->frh_blocks[page][block]).fb_disk;
 		doffset = (hdl->frh_blocks[page][block]).fb_offset;
-		iosize = min(len, hdl->frh_bsize);
+		iosize = min(len, hdl->frh_bsize); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 		dbg("FSRAW %s: disk = %p, off = %llu, len = %u, page = %d, block = %u," 
 			"doffset = %llu, iosize = %u", write ? "WRITE" : "READ", disk,
