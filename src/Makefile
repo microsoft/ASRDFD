@@ -22,7 +22,7 @@ endif
 
 BLD_DIR=${WORKING_DIR}/
 
-EXTRA_CFLAGS += $(CFLAGS) -Wall -Wstrict-prototypes -DINM_LINUX -D__INM_KERNEL_DRIVERS__
+INM_CFLAGS += $(CFLAGS) -Wall -Wstrict-prototypes -DINM_LINUX -D__INM_KERNEL_DRIVERS__
 
 ifeq (, $(VERSION_MAJOR))
 	VERSION_MAJOR:=1
@@ -33,17 +33,17 @@ ifeq (, $(VERSION_MINOR))
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
-	VERSION_BUILDNUM:=5
+	VERSION_BUILDNUM:=6
 endif
 
 ifeq (, $(VERSION_PRIVATE))
 	VERSION_PRIVATE:=1
 endif
 
-EXTRA_CFLAGS += -DINMAGE_PRODUCT_VERSION_MAJOR=${VERSION_MAJOR}
-EXTRA_CFLAGS += -DINMAGE_PRODUCT_VERSION_MINOR=${VERSION_MINOR}
-EXTRA_CFLAGS += -DINMAGE_PRODUCT_VERSION_BUILDNUM=${VERSION_BUILDNUM}
-EXTRA_CFLAGS += -DINMAGE_PRODUCT_VERSION_PRIVATE=${VERSION_PRIVATE}
+INM_CFLAGS += -DINMAGE_PRODUCT_VERSION_MAJOR=${VERSION_MAJOR}
+INM_CFLAGS += -DINMAGE_PRODUCT_VERSION_MINOR=${VERSION_MINOR}
+INM_CFLAGS += -DINMAGE_PRODUCT_VERSION_BUILDNUM=${VERSION_BUILDNUM}
+INM_CFLAGS += -DINMAGE_PRODUCT_VERSION_PRIVATE=${VERSION_PRIVATE}
 
 ifeq (, $(BLD_DATE))
 	# same as __DATE__
@@ -53,7 +53,7 @@ ifeq (, $(BLD_TIME))
 	# same as __TIME__
 	BLD_TIME=""$(shell date +"%H:%M:%S")""
 endif
-EXTRA_CFLAGS += -DBLD_DATE="\"${BLD_DATE}\"" -DBLD_TIME="\"${BLD_TIME}\""
+INM_CFLAGS += -DBLD_DATE="\"${BLD_DATE}\"" -DBLD_TIME="\"${BLD_TIME}\""
 
 # To handle distro and/or update/service pack/patch sepecific issues
 VENDOR:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH; \
@@ -64,17 +64,17 @@ VENDOR:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH; \
 	elif [ -f /etc/debian_version ]; then echo "debian"; \
 	else echo "OS_UNKNOWN"; fi)
 
-EXTRA_CFLAGS += -D${VENDOR}
+INM_CFLAGS += -D${VENDOR}
 
 ifeq (yes, $(noerror))
-	EXTRA_CFLAGS += -Wno-error
+	INM_CFLAGS += -Wno-error
 endif
 
 ifeq ($(findstring ubuntu, $(VENDOR)), ubuntu)
 	DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
 		    	grep DISTRIB_RELEASE /etc/lsb-release | cut -d"=" -f2 | \
 			cut -d"." -f 1)
-	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
+	INM_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
 endif
 
 ifeq ($(findstring suse, $(VENDOR)), suse)
@@ -96,9 +96,9 @@ ifeq ($(findstring suse, $(VENDOR)), suse)
 	ifeq ($(PATCH_LEVEL), )
 		PATCH_LEVEL:=0
 	endif
-	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER} -DPATCH_LEVEL=${PATCH_LEVEL}
+	INM_CFLAGS += -DDISTRO_VER=${DISTRO_VER} -DPATCH_LEVEL=${PATCH_LEVEL}
 	ifeq ($(DISTRO_VER), 12)
-		EXTRA_CFLAGS += -mindirect-branch=thunk-inline -mindirect-branch-register
+		INM_CFLAGS += -mindirect-branch=thunk-inline -mindirect-branch-register
 	endif
 endif
 
@@ -137,6 +137,8 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 		UPDATE:=`if [ \`grep Update /etc/redhat-release | wc -l\`  -le 1 ]; \
 			 then echo 0; else cat /etc/redhat-release | cut -d" " -f 10 | \
 			 tr -d ")"; fi`
+	else ifeq ($(DISTRO_VER), 10)
+		UPDATE:=$(shell echo $(KDIR) | sed -n 's/.*el10_\([0-9]\+\).*/\1/p')
 	else
 		ifneq ($(VER_STR), $(DISTRO_VER))
 			UPDATE:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
@@ -156,51 +158,59 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 		DISTRO_VER:=0
 	endif
 
-	EXTRA_CFLAGS += -DDISTRO_VER=${DISTRO_VER} -DUPDATE=${UPDATE}
+	INM_CFLAGS += -DDISTRO_VER=${DISTRO_VER} -DUPDATE=${UPDATE}
 	ifeq ($(findstring 4.18.0-425, $(KDIR)), 4.18.0-425)
 		ifeq ($(findstring el8, $(KDIR)), el8)
-			EXTRA_CFLAGS += -DSET_INM_QUEUE_FLAG_STABLE_WRITE
+			INM_CFLAGS += -DSET_INM_QUEUE_FLAG_STABLE_WRITE
 		endif
 	endif
 
 	ifeq ($(findstring 5.14.0-70.13.1.el9_0.x86_64, $(KDIR)), 5.14.0-70.13.1.el9_0.x86_64)
-		EXTRA_CFLAGS += -DRHEL9_0
+		INM_CFLAGS += -DRHEL9_0
+	endif
+
+	ifeq ($(findstring 5.14.0-70, $(KDIR)), 5.14.0-70)
+		INM_CFLAGS += -DRHEL9_0_1
 	endif
 
 	ifeq ($(findstring 5.14.0-284.11.1.el9_2.x86_64, $(KDIR)), 5.14.0-284.11.1.el9_2.x86_64)
-		EXTRA_CFLAGS += -DRHEL9_2
+		INM_CFLAGS += -DRHEL9_2
 	endif
 
 	ifeq ($(findstring 5.14.0-362, $(KDIR)), 5.14.0-362)
-		EXTRA_CFLAGS += -DRHEL9_3
+		INM_CFLAGS += -DRHEL9_3
 	endif
 
 	ifeq ($(findstring 5.14.0-427, $(KDIR)), 5.14.0-427)
-		EXTRA_CFLAGS += -DRHEL9_4
+		INM_CFLAGS += -DRHEL9_4
 	endif
 
 	ifeq ($(findstring 5.14.0-503, $(KDIR)), 5.14.0-503)
-		EXTRA_CFLAGS += -DRHEL9_5
+		INM_CFLAGS += -DRHEL9_5
 	endif
 
 	ifeq ($(findstring 5.14.0-570, $(KDIR)), 5.14.0-570)
-		EXTRA_CFLAGS += -DRHEL9_6
+		INM_CFLAGS += -DRHEL9_6
+	endif
+
+	ifeq ($(findstring 5.14.0-611, $(KDIR)), 5.14.0-611)
+		INM_CFLAGS += -DRHEL9_7
 	endif
 
 	ifeq ($(findstring uek, $(KDIR)), uek)
-		EXTRA_CFLAGS += -DUEK
+		INM_CFLAGS += -DUEK
 	endif
 	ifeq ($(findstring 2.6.32-100.28.5.el6.x86_64, $(KDIR)), 2.6.32-100.28.5.el6.x86_64)
-		EXTRA_CFLAGS += -DUEK
+		INM_CFLAGS += -DUEK
 	endif
 	ifeq ($(findstring 4.14.35-1902.0.18.el7uek.x86_64, $(KDIR)), 4.14.35-1902.0.18.el7uek.x86_64)
-		EXTRA_CFLAGS += -DOL7UEK5
+		INM_CFLAGS += -DOL7UEK5
 	endif
 	ifeq ($(findstring 5.4.17-2011.1.2.el7uek.x86_64, $(KDIR)), 5.4.17-2011.1.2.el7uek.x86_64)
-		EXTRA_CFLAGS += -DOL7UEK6
+		INM_CFLAGS += -DOL7UEK6
 	endif
 	ifeq ($(findstring 5.15.0-0.30.19.el9uek.x86_64, $(KDIR)), 5.15.0-0.30.19.el9uek.x86_64)
-		EXTRA_CFLAGS += -DOL9UEK7
+		INM_CFLAGS += -DOL9UEK7
 	endif
 endif
 
@@ -208,41 +218,47 @@ ifeq (yes, $(debug))
     ifeq ($(findstring suse, $(VENDOR)), suse)
 	ifeq ($(DISTRO_VER), 11)
 	    ifeq ($(PATCH_LEVEL), 2)
-		EXTRA_CFLAGS += -DINM_DEBUG -DIDEBUG_MIRROR -g3 -gdwarf-2 -O2
+		INM_CFLAGS += -DINM_DEBUG -DIDEBUG_MIRROR -g3 -gdwarf-2 -O2
 	    endif
 	endif
     else
-		EXTRA_CFLAGS += -DINM_DEBUG -DIDEBUG_MIRROR -g3 -gdwarf-2 -O0
+		INM_CFLAGS += -DINM_DEBUG -DIDEBUG_MIRROR -g3 -gdwarf-2 -O0
     endif
 else
     ifeq (all, $(debug))
 	ifeq ($(findstring suse, $(VENDOR)), suse)
 	    ifeq ($(DISTRO_VER), 11)
 		ifeq ($(PATCH_LEVEL), 2)
-		    EXTRA_CFLAGS += -DINM_DEBUG -DIDEBUG -DIDEBUG_META -DIDEBUG_MIRROR -DIDEBUG_MIRROR_IO -g3 -gdwarf-2 -O2
+		    INM_CFLAGS += -DINM_DEBUG -DIDEBUG -DIDEBUG_META -DIDEBUG_MIRROR -DIDEBUG_MIRROR_IO -g3 -gdwarf-2 -O2
 		endif
 	    endif
 	else
-    	    EXTRA_CFLAGS += -DINM_DEBUG -DIDEBUG -DIDEBUG_META -DIDEBUG_MIRROR -DIDEBUG_MIRROR_IO -g3 -gdwarf-2 -O0
+    	    INM_CFLAGS += -DINM_DEBUG -DIDEBUG -DIDEBUG_META -DIDEBUG_MIRROR -DIDEBUG_MIRROR_IO -g3 -gdwarf-2 -O0
 	endif
     else
-	    EXTRA_CFLAGS += -O3 -g3
+	    INM_CFLAGS += -O3 -g3
     endif
 endif
 
 ifeq (yes, $(err))
-	EXTRA_CFLAGS += -DINJECT_ERR
+	INM_CFLAGS += -DINJECT_ERR
 endif
 
 ifeq (yes, $(fabric))
-	EXTRA_CFLAGS += -DAPPLIANCE_DRV
+	INM_CFLAGS += -DAPPLIANCE_DRV
 endif
 
 ifeq (yes, $(TELEMETRY))
-	EXTRA_CFLAGS += -DTELEMETRY
+	INM_CFLAGS += -DTELEMETRY
 endif
 
-EXTRA_CFLAGS += -I${BLD_DIR}
+INM_CFLAGS += -I${BLD_DIR}
+
+# Use INM_CFLAGS as an intermediate variable to avoid recursive reference
+# between ccflags-y and EXTRA_CFLAGS in newer kernels (6.x+).
+# ccflags-y is used by newer kernels, EXTRA_CFLAGS by older ones.
+ccflags-y += $(INM_CFLAGS)
+EXTRA_CFLAGS += $(INM_CFLAGS)
 
 OBJ_MODULE=involflt.o
 ifneq (yes, $(dummy))
@@ -328,7 +344,7 @@ involflt-objs := ${INVOLFLT_OBJS}
 all:
 	@echo "BLD_DATE: ${BLD_DATE}"
 	@echo "BLD_TIME: ${BLD_TIME}"
-	@echo "EXTRA_CFLAGS: ${EXTRA_CFLAGS}"
+	@echo "INM_CFLAGS: ${INM_CFLAGS}"
 	$(MAKE) -C ${KDIR} M=${BLD_DIR} modules
 
 #cleaning all the build files

@@ -57,6 +57,19 @@ typedef blk_status_t (queue_rq_fn)(struct blk_mq_hw_ctx *,
 		const struct blk_mq_queue_data *);
 #endif
 blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx, const struct blk_mq_queue_data *bd);
+#ifdef INM_QUEUE_RQS_ENABLED
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0) || defined(RHEL9_7) || (defined(RHEL10) && UPDATE != 0) || (defined(debian) && LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#ifndef queue_rqs_fn
+typedef void (queue_rqs_fn)(struct rq_list *);
+#endif
+void inm_queue_rqs(struct rq_list *rqlist);
+#else
+#ifndef queue_rqs_fn
+typedef void (queue_rqs_fn)(struct request **);
+#endif
+void inm_queue_rqs(struct request **rqlist);
+#endif
+#endif
 dm_bio_info_t *inm_alloc_bioinfo(void);
 change_node_t *inm_alloc_chgnode(void);
 void inm_alloc_pools(void);
@@ -117,7 +130,7 @@ do{                                                                     \
 }while(0)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0) || defined(RHEL9_6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0) || defined(RHEL9_6) || defined(RHEL9_7)
 #define	INM_QUEUE_FEATURES(q)	((q)->limits.features)
 #define	SET_STABLE_PAGES(q)	(INM_QUEUE_FEATURES(q) |= BLK_FEAT_STABLE_WRITES)
 #define	CLEAR_STABLE_PAGES(q)	(INM_QUEUE_FEATURES(q) &= ~BLK_FEAT_STABLE_WRITES)
@@ -148,5 +161,7 @@ do{                                                                     \
 #ifndef INMAGE_PRODUCT_VERSION_PRIVATE
 #define INMAGE_PRODUCT_VERSION_PRIVATE 1
 #endif
+
+inm_s32_t isrootvol(struct _target_context *vcptr);
 
 #endif /* _INM_FILTER_HOST_H*/

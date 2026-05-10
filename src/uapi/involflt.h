@@ -59,7 +59,11 @@
 
 #define TAG_FS_FROZEN_IN_USERSPACE 0x0004
 
+/* Flag is used where defaut is tag commit not required */
 #define TAG_DISK_DRAIN_BARRIER 0x0001
+
+/* Flag is used where defaut is tag commit required */
+#define TAG_DISK_NO_DRAIN_BARRIER 0x0002
 
 #define VACP_IOBARRIER_TIMEOUT          300     /* in ms */
 #define VACP_TAG_COMMIT_TIMEOUT         300     /* in ms */
@@ -512,6 +516,10 @@ typedef struct _inm_attribute{
 #else
 #define MAX_DIRTY_CHANGES_V2 204
 #endif
+
+#define MIN_DATA_SZ_PER_CHANGE_NODE          (1*1024*1024) 	/* 1MB */
+#define DEFAULT_MAX_DATA_SZ_PER_CHANGE_NODE  (4*1024*1024)	/* 4MB */
+#define MAX_DATA_SZ_PER_CHANGE_NODE          (64*1024*1024)	/* 64MB */
 
 #define UDIRTY_BLOCK_FLAG_START_OF_SPLIT_CHANGE     0x00000001
 #define UDIRTY_BLOCK_FLAG_PART_OF_SPLIT_CHANGE      0x00000002
@@ -998,7 +1006,9 @@ enum {
 	GET_DRAIN_STATE_CMD,
 	SET_DRAIN_STATE_CMD,
 	GET_DB_CMD_V2,
-	REMOVE_FILTER_DEVICE_CMD
+	REMOVE_FILTER_DEVICE_CMD,
+	DUMP_DRIVER_STRUCTS,
+	DBG_AS_ERR
 };
 
 
@@ -1311,6 +1321,8 @@ typedef struct _VOLUME_STATS_V2 {
 	LARGE_INTEGER       liClearDiffsTimeStamp;
 	LARGE_INTEGER       liCommitDBTimeStamp;
 	LARGE_INTEGER       liGetDBTimeStamp;
+	unsigned long long  ullNrQueueRqBios;
+	unsigned long long  ullNrQueueRqsBios;
 } VOLUME_STATS_V2;
 
 typedef struct _TELEMETRY_VOL_STATS
@@ -1435,5 +1447,7 @@ typedef struct _MODIFY_PERSISTENT_DEVICE_NAME_INPUT {
 	VOLUME_GUID OldPName;
 	VOLUME_GUID NewPName;
 } MODIFY_PERSISTENT_DEVICE_NAME_INPUT, *PMODIFY_PERSISTENT_DEVICE_NAME_INPUT;
+
+extern bool g_dbg_as_err;
 
 #endif /* ifndef INVOLFLT_H */

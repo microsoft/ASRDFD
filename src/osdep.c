@@ -63,7 +63,7 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0) || defined SLES12 || \
 		defined SLES15
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,10,0) || defined SLES12 || \
-		defined SLES15 && !defined(SLES15SP6)
+		defined SLES15 && !defined(SLES15SP6) && !defined(SLES15SP7)
 #include <linux/slab_def.h>
 #endif
 #endif
@@ -72,7 +72,7 @@ extern driver_context_t *driver_ctx;
 
 atomic_t inm_flt_memprint;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -1132,7 +1132,7 @@ replace_sd_open(void)
 	driver_ctx->dc_at_lun.dc_at_drv_info.mod_dev_ops.open = inm_sd_open;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
 static int
 inm_sd_open(struct gendisk *disk, blk_mode_t mode)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
@@ -1144,7 +1144,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 #endif
 {
 	 inm_s32_t err = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(RHEL9_7) && !defined(SLES15SP6) && !defined(SLES15SP7)
 	 struct gendisk *disk = NULL;
 #endif
 	 struct scsi_device *sdp = NULL;
@@ -1154,7 +1154,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 		 goto out;
 	 } 
 	 INM_ATOMIC_INC(&(driver_ctx->dc_at_lun.dc_at_drv_info.nr_in_flight_ops));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(disk, mode);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(bdev, mode);
@@ -1162,7 +1162,7 @@ inm_sd_open(struct inode *inode, struct file *filp)
 	 err = driver_ctx->dc_at_lun.dc_at_drv_info.orig_drv_open(inode, filp);
 #endif
 	 if(!err) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(SLES15SP6)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0) && !defined(RHEL9_4) && !defined(RHEL9_5) && !defined(RHEL9_6) && !defined(RHEL9_7) && !defined(SLES15SP6) && !defined(SLES15SP7)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 		disk = bdev->bd_disk;
 #else
@@ -1637,7 +1637,7 @@ inm_file_open_by_devnum(dev_t dev, unsigned mode)
 struct block_device *
 inm_open_by_devnum(dev_t dev, unsigned mode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6) || defined(SLES15SP7)
 	return blkdev_get_by_dev(dev, mode, NULL, NULL);
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,35)
 	return blkdev_get_by_dev(dev, mode, NULL);
@@ -2273,11 +2273,11 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 				dbg ("the volume [%s] is already frozen",
 							freeze_ele->vol_name);
 				ret = -1;
-				goto out;
+				goto out_unlock;
 			}
 		}
 		freeze_ele = NULL;
-	}
+	}	
 
 	freeze_vinfo =
 	  (freeze_vol_info_t *) INM_KMALLOC (sizeof (freeze_vol_info_t),
@@ -2286,7 +2286,7 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 	{
 		err ("Failed to allocate the freeze_vol_info_t object");
 		ret = -1;
-		goto out;
+		goto out_unlock;
 	}
 	INM_MEM_ZERO (freeze_vinfo, sizeof (freeze_vol_info_t));
 
@@ -2305,35 +2305,38 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 	{
 		info ("failed to open block device handle %s", freeze_vinfo->vol_name);
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
-	freeze_vinfo->filp = inm_file_open_by_dev_path(freeze_vinfo->vol_name,
-						FMODE_READ | FMODE_WRITE);
-	if (freeze_vinfo->filp)
-	{
-		freeze_vinfo->bdev = file_bdev(freeze_vinfo->filp);
-	}
-	else
-	{
-		info ("failed to open block device file %s", freeze_vinfo->vol_name);
-#else
-	freeze_vinfo->bdev = open_by_dev_path_v2 (freeze_vinfo->vol_name,
-						FMODE_READ | FMODE_WRITE);
-	if (!(freeze_vinfo->bdev))
-	{
-		info ("failed to open block device %s", freeze_vinfo->vol_name);
-#endif
-		if (freeze_vinfo)
+		freeze_vinfo->filp = inm_file_open_by_dev_path(freeze_vinfo->vol_name,
+														FMODE_READ | FMODE_WRITE);
+		if (freeze_vinfo->filp)
 		{
-			INM_KFREE (freeze_vinfo, sizeof (freeze_vol_info_t),
-				                             INM_KERNEL_HEAP);
-			freeze_vinfo = NULL;
+			freeze_vinfo->bdev = file_bdev(freeze_vinfo->filp);
 		}
-		ret = -1;
-		goto out;
-	}
+		else
+		{
+			info ("failed to open block device file %s", freeze_vinfo->vol_name);
+#else
+		freeze_vinfo->bdev = open_by_dev_path_v2 (freeze_vinfo->vol_name,
+							FMODE_READ | FMODE_WRITE);
+		if (!(freeze_vinfo->bdev))
+		{
+			info ("failed to open block device %s", freeze_vinfo->vol_name);
+	#endif
+			if (freeze_vinfo)
+			{
+				INM_KFREE (freeze_vinfo, sizeof (freeze_vol_info_t),
+												INM_KERNEL_HEAP);
+				freeze_vinfo = NULL;
+			}
+			ret = -1;
+			goto out_unlock;
+		}
 
-	if (inm_freeze_bdev(freeze_vinfo->bdev, freeze_vinfo->sb)) {
-		info (" failed to freeze block device %s",
-						freeze_vinfo->vol_name);
+		/* dont hold the mutex during actual freeze call to allow thaw in case of timeout */
+		INM_UP(&driver_ctx->dc_freezevol_mutex);
+
+		if (inm_freeze_bdev(freeze_vinfo->bdev, freeze_vinfo->sb)) {
+			info (" failed to freeze block device %s",
+							freeze_vinfo->vol_name);
 #if defined(INM_HANDLE_FOR_BDEV_ENABLED)
 		close_bdev_handle(freeze_vinfo->handle);
 		freeze_vinfo->handle = NULL;
@@ -2355,12 +2358,61 @@ process_freeze_volume(freeze_info_t *freeze_vol)
 		goto out;
 	}
 
+	info ("Successful to freeze block device %s, tag_guid = %s", freeze_vinfo->vol_name, freeze_vol->tag_guid);
 
-	/* insert the node inside the freeze volume list */
-	inm_list_add_tail (&freeze_vinfo->freeze_list_entry,
-				       &driver_ctx->freeze_vol_list);
+	INM_DOWN(&driver_ctx->dc_freezevol_mutex);
 
-	ret = 0;
+	/* check once again that the same GUID is still in progress before adding to list */
+	/* since a thaw timeout could have happened if freeze took a long time and it could have cleared the current GUID */
+	/* for first freeze, INM_CP_APP_ACTIVE is set AFTER the freeze success, hence we need to take another variable to track it */
+	if ((!driver_ctx->dc_thaw_timeout_triggered) &&
+		((driver_ctx->dc_firstfreeze_vol == TRUE && driver_ctx->dc_cp == INM_CP_NONE) || 
+	    (driver_ctx->dc_firstfreeze_vol == FALSE && driver_ctx->dc_cp == INM_CP_APP_ACTIVE))) {
+
+		/* compare guids only if its not the first freeze as dc_cp_guid is set AFTER first freeze only */
+		if ((driver_ctx->dc_firstfreeze_vol == FALSE) && 
+			INM_MEM_CMP(driver_ctx->dc_cp_guid, freeze_vol->tag_guid,
+				        sizeof(driver_ctx->dc_cp_guid))) {
+			err("GUID mismatch, driver has %s, but freeze request has %s",
+					driver_ctx->dc_cp_guid, freeze_vol->tag_guid);
+			ret = -EINVAL;
+			goto out_unlock;
+		}
+		/* SAME TAG still in progress - insert the node inside the freeze volume list */
+		inm_list_add_tail (&freeze_vinfo->freeze_list_entry,
+						&driver_ctx->freeze_vol_list);
+		ret = 0;
+	}
+	else {
+		err("No CP active, dc_cp = %d, firstfreeze = %d, cannot freeze volume %s, starting thaw",
+					driver_ctx->dc_cp, driver_ctx->dc_firstfreeze_vol, freeze_vinfo->vol_name);
+		/* if the cp is not active, then we need to thaw the frozen volume */
+		inm_thaw_bdev(freeze_vinfo->bdev, freeze_vinfo->sb);
+#if defined(INM_HANDLE_FOR_BDEV_ENABLED)
+		close_bdev_handle(freeze_vinfo->handle);
+		freeze_vinfo->handle = NULL;
+#elif defined(INM_FILP_FOR_BDEV_ENABLED)
+		close_file (freeze_vinfo->filp);
+		freeze_vinfo->filp = NULL;
+#else
+		close_bdev (freeze_vinfo->bdev, FMODE_READ | FMODE_WRITE);
+#endif
+		err("Thaw completed for volume %s",	freeze_vinfo->vol_name);
+		freeze_vinfo->bdev = NULL;
+		freeze_vinfo->sb = NULL;
+		if (freeze_vinfo)
+		{
+			INM_KFREE (freeze_vinfo, sizeof (freeze_vol_info_t),
+							INM_KERNEL_HEAP);
+			freeze_vinfo = NULL;
+		}
+		ret = -1;
+		
+		goto out_unlock;
+	}
+
+out_unlock:
+	INM_UP(&driver_ctx->dc_freezevol_mutex);
 
 out:
 	if (ret) {
@@ -2368,8 +2420,6 @@ out:
 	} else {
 		freeze_vol->vol_info->status |= STATUS_FREEZE_SUCCESS;
 	}
-
-	INM_UP(&driver_ctx->dc_freezevol_mutex);
 
 	dbg ("leaving process_freeze_volume");
 	return ret;
@@ -2484,6 +2534,13 @@ process_freeze_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 			break;
 		}
 
+		if (!no_of_vol_freeze_done && driver_ctx->dc_cp == INM_CP_NONE)
+		{
+			/* tracks whether it is the first freeze in app consistency */
+			driver_ctx->dc_firstfreeze_vol = TRUE;
+			driver_ctx->dc_thaw_timeout_triggered = FALSE;
+		}
+
 		/* process the freeze volume list */
 		freeze_vol->vol_info->vol_name[TAG_VOLUME_MAX_LENGTH - 1] = '\0';
 		ret = process_freeze_volume(freeze_vol);
@@ -2492,6 +2549,8 @@ process_freeze_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 					freeze_vol->vol_info->vol_name);
 		} else {
 			no_of_vol_freeze_done++;
+			dbg("Volume %s frozen successfully, %d/%d freeze done",
+					freeze_vol->vol_info->vol_name, numvol+1, freeze_vol->nr_vols);
 		}
 		if(INM_COPYOUT(arg, freeze_vol->vol_info,
 					sizeof(*freeze_vol->vol_info))) {
@@ -2514,6 +2573,7 @@ process_freeze_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 		/* If first freeze ioctl, copy the guid and start timer */
 		if (driver_ctx->dc_cp == INM_CP_NONE) {
 			driver_ctx->dc_cp |= INM_CP_APP_ACTIVE;
+			driver_ctx->dc_firstfreeze_vol = FALSE;
 			dbg("First freeze");
 			dbg("New cp state = %d", driver_ctx->dc_cp);
 			memcpy_s(&driver_ctx->dc_cp_guid,
@@ -2623,6 +2683,7 @@ out:
 	if (inm_list_empty(&driver_ctx->freeze_vol_list)) {
 		dbg("All volume thawed");
 		driver_ctx->dc_cp &= ~INM_CP_APP_ACTIVE;
+		driver_ctx->dc_firstfreeze_vol = FALSE;
 		dbg("New cp state = %d", driver_ctx->dc_cp);
 		if (driver_ctx->dc_cp == INM_CP_NONE)
 			end_cp_timer();
@@ -2698,7 +2759,8 @@ process_thaw_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 	INM_DOWN(&(driver_ctx->dc_cp_mutex));
 
 	if (!(driver_ctx->dc_cp & INM_CP_APP_ACTIVE)) {
-		err("Thaw without freeze");
+		err("Thaw without freeze called for %d volumes",
+					thaw_vol->nr_vols);
 		ret = -EINVAL;
 		goto out_unlock;
 	}
@@ -2821,13 +2883,16 @@ inm_fvol_list_thaw_on_timeout(wqentry_t *not_used)
 		}
 	}
 
+	/* set this var to signal any pending freezes that they need to thaw immediately */
+	driver_ctx->dc_thaw_timeout_triggered = TRUE;
+
 	/* release freezevol mutex before acquiring dc_cp_mutex to avoid any nesting issues */
 	INM_UP(&(driver_ctx->dc_freezevol_mutex));
 
 	INM_DOWN(&(driver_ctx->dc_cp_mutex));
-
+	
 	driver_ctx->dc_cp &= ~INM_CP_APP_ACTIVE;
-
+	driver_ctx->dc_firstfreeze_vol = FALSE;
 	/* release the lock */
 	INM_UP(&(driver_ctx->dc_cp_mutex));
 
@@ -3334,6 +3399,9 @@ process_iobarrier_tag_volume_ioctl(inm_devhandle_t *idhp, void __INM_USER *arg)
 				else {
 					is_root_disk_drain_barrier_set = 1;
 				}
+			}
+			else {
+				err("Root disk not found in driver context for TVM and tag commit is pending");
 			}
 		}
 
@@ -3906,7 +3974,7 @@ log_console(const char *fmt, ...)
 void
 inm_blkdev_name(inm_bio_dev_t *bdev, char *name)
 {
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	snprintf(name, INM_BDEVNAME_SIZE, "%pg", bdev);
 #else
 	bdevname(bdev, name);
@@ -3922,7 +3990,7 @@ inm_blkdev_get(inm_bio_dev_t *bdev)
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
 	return (IS_ERR(bdev_file_open_by_dev(bdev->bd_dev,
 			FMODE_READ | FMODE_WRITE, NULL, NULL)) ? 1: 0);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(RHEL9_4) || defined(SLES15SP6) || defined(SLES15SP7)
 	return (IS_ERR(blkdev_get_by_dev(bdev->bd_dev,
 			BLK_OPEN_READ | BLK_OPEN_WRITE, NULL, NULL)) ? 1 : 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -66,8 +66,8 @@ fstream_raw_print_map(char *file, fstream_raw_hdl_t *hdl)
 	info("HDL3: Blkmap");
 	for (i = 0; i < hdl->frh_npages; i++) {
 		info("page[%d] = %p", i, hdl->frh_blocks[i]);
-		info("%16s %16s %16s %16s", 
-			"foffset","disk", "sector", "length");
+		info("%16s %16s %16s %16s %16s", 
+			"foffset","disk", "byte_offset", "sector", "length");
 
 		for (j = 0; j < FSRAW_BLK_PER_PAGE && nblks; nblks--, j++) {
 			if (doffset != 0) { /* previous valid block */
@@ -78,8 +78,8 @@ fstream_raw_print_map(char *file, fstream_raw_hdl_t *hdl)
 					len += hdl->frh_bsize;
 				} else {
 					inm_blkdev_name(disk, diskname);
-					info("%16llu %16s %16llu %16u", 
-					    foffset, diskname, 
+					info("%16llu %16s %16llu %16llu %16u", 
+					    foffset, diskname, doffset,
 					    doffset >> INM_SECTOR_SHIFT, len);
 					foffset += len;
 					doffset = 0;
@@ -94,8 +94,8 @@ fstream_raw_print_map(char *file, fstream_raw_hdl_t *hdl)
 
 			if (nblks == 1) {
 				inm_blkdev_name(disk, diskname);
-				info("%16llu %16s %16llu %16u", 
-					foffset, diskname, 
+				info("%16llu %16s %16llu %16llu %16u", 
+					foffset, diskname, doffset,
 					doffset >> INM_SECTOR_SHIFT, len);
 			}
 		}
@@ -180,6 +180,43 @@ fstream_raw_map_file_blocks(fstream_raw_hdl_t *hdl, inm_bio_dev_t *disk,
 	inm_u32_t page = 0;
 	inm_u32_t block = 0;
 	inm_irqflag_t flag = 0;
+	inm_u64_t part_start_offset = 0;
+
+	/* Get partition start offset to convert whole-disk sectors to partition-relative
+	 * When bi_sector in BIO contains whole-disk sector (e.g., 5230024 on /dev/sda),
+	 * but we later open /dev/sda4 for reading, we need partition-relative sectors.
+	 * Example: /dev/sda4 starts at sector 3127296, so subtract that from doffset.
+	 * 
+	 * However, only apply this if:
+	 * 1. We have a partition (bd_part exists and has non-zero start_sect)
+	 * 2. The doffset is >= partition start (otherwise it's already partition-relative)
+	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
+	if (disk->bd_part && disk->bd_part->start_sect) {
+		part_start_offset = (inm_u64_t)disk->bd_part->start_sect << INM_SECTOR_SHIFT;
+	}
+#else
+	{
+		sector_t start_sect = get_start_sect(disk);
+		if (start_sect) {
+			part_start_offset = (inm_u64_t)start_sect << INM_SECTOR_SHIFT;
+		}
+	}
+#endif
+
+	/* Adjust doffset to be partition-relative only if it looks like whole-disk offset */
+    if (part_start_offset) {
+        if (doffset >= part_start_offset) {
+            inm_u64_t original_doffset = doffset;
+            doffset -= part_start_offset;
+            dbg("[PID=%d %s] Adjusted disk offset: %llu -> %llu (subtracted partition start %llu)",
+                current->pid, current->comm, original_doffset, doffset, part_start_offset);
+        } else {
+            /* doffset < part_start_offset means it's likely already partition-relative */
+            dbg("doffset=%llu is less than partition start=%llu, assuming already partition-relative",
+                doffset, part_start_offset);
+        }
+    }
 
 	dbg("disk = %p, f_offset = %llu, d_offset = %llu, len = %u", 
 		disk, foffset, doffset, len);
@@ -229,6 +266,9 @@ fstream_raw_map_bio(inm_buf_t *bio)
 	fstream_raw_hdl_t *hdl = driver_ctx->dc_lcw_rhdl;
 	inm_bio_dev_t *bdev;
 
+	dbg("[PID=%d %s] fstream_raw_map_bio CALLED: hdl=%p, sector=%llu, size=%u, frh_nblks=%d", 
+	    current->pid, current->comm, hdl, (unsigned long long)INM_BUF_SECTOR(bio), INM_BUF_COUNT(bio),
+	    hdl ? hdl->frh_nblks : -1);
 	dbg("Hdl = %p", hdl);
    
 	if (hdl->frh_bsize < PAGE_SIZE) {
@@ -441,8 +481,14 @@ fstream_raw_open(char *file, inm_u64_t offset, inm_u32_t len,
 		goto out;
 	}
 
+	dbg("[PID=%d %s] fstream_raw_open: Starting block mapping loop - lcwModeOn=%d, dc_lcw_aops=%p, dc_lcw_rhdl=%p",
+	    current->pid, current->comm, lcwModeOn, driver_ctx->dc_lcw_aops, driver_ctx->dc_lcw_rhdl);
+
 	while (len) {
-		iosize = min(len, (inm_u32_t)PAGE_SIZE);
+		iosize = min(len, (inm_u32_t)PAGE_SIZE); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+
+		dbg("[PID=%d %s] fstream_raw_open: About to read offset=%llu, size=%u (frh_nblks=%d)", 
+		    current->pid, current->comm, offset, iosize, hdl->frh_nblks);
 
 		if (!flt_read_file(filp, buf, offset, iosize, &iodone) ||
 			iodone != iosize) {
@@ -451,6 +497,9 @@ fstream_raw_open(char *file, inm_u64_t offset, inm_u32_t len,
 			break;
 		}
 
+		dbg("[PID=%d %s] fstream_raw_open: Read succeeded, about to write offset=%llu, size=%u", 
+		    current->pid, current->comm, offset, iosize);
+
 		if (!flt_write_file(filp, buf, offset, iosize, &iodone) || 
 			iodone != iosize) {
 			err("Write Failed: %llu:%u:%u", 
@@ -458,6 +507,9 @@ fstream_raw_open(char *file, inm_u64_t offset, inm_u32_t len,
 			error = -EIO;
 			break;
 		}
+
+		dbg("[PID=%d %s] fstream_raw_open: Write succeeded (frh_nblks=%d after write)", 
+		    current->pid, current->comm, hdl->frh_nblks);
 
 		/* 
 		 * For fs bsize >= PAGE_SIZE except last partial block io, 
@@ -527,7 +579,7 @@ fstream_raw_perform_block_io(inm_bio_dev_t *disk, char *buf, inm_u64_t offset,
 	}
 
 	if (!filp) {
-		snprintf(diskname, INM_PATH_MAX, "%s", INM_BDEVNAME_PREFIX);
+		snprintf(diskname, sizeof(diskname), "%s", INM_BDEVNAME_PREFIX);
 		inm_blkdev_name(disk, diskname + strlen(INM_BDEVNAME_PREFIX));
 
 		if (!flt_open_file(diskname, O_RDWR | O_SYNC, &filp)) {
@@ -539,12 +591,17 @@ fstream_raw_perform_block_io(inm_bio_dev_t *disk, char *buf, inm_u64_t offset,
 		prev_disk = disk;
 	}
 
-	info("%s: %s [%llu:%u] %p", write ? "WRITE" : "READ",
-		 diskname, offset, len, buf);
-	if (write) 
+	if (write) {
+		dbg("WRITE: %s byte_offset:%llu sector:%llu size:%u", 
+		    diskname, offset, offset >> INM_SECTOR_SHIFT, len);
 		flt_write_file(filp, buf, offset, len, &iodone);
-	else
+		dbg("WRITE complete: iodone=%u (expected %u) status=%s", 
+		    iodone, len, (iodone == len) ? "SUCCESS" : "FAILED");
+	} else {
+		dbg("READ: %s byte_offset:%llu sector:%llu size:%u", 
+		    diskname, offset, offset >> INM_SECTOR_SHIFT, len);
 		flt_read_file(filp, buf, offset, len, &iodone);
+	}
 
 	return (iodone == len) ? 0 : -EIO;
 }
@@ -570,7 +627,7 @@ fstream_raw_io(fstream_raw_hdl_t *hdl, char *buf, inm_u32_t len,
 
 		disk = (hdl->frh_blocks[page][block]).fb_disk;
 		doffset = (hdl->frh_blocks[page][block]).fb_offset;
-		iosize = min(len, hdl->frh_bsize);
+		iosize = min(len, hdl->frh_bsize); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 		dbg("FSRAW %s: disk = %p, off = %llu, len = %u, page = %d, block = %u," 
 			"doffset = %llu, iosize = %u", write ? "WRITE" : "READ", disk,

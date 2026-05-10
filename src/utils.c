@@ -901,7 +901,7 @@ cnvt_tag_info2stream(tag_info_t * tag_info, inm_s32_t num_tags, inm_u32_t flag)
 	unsigned short ltag_len = 0;
 	unsigned long uuid_len = 0;
 	unsigned char *taglenp = NULL;
-	inm_u16_t i = 0;
+	inm_u32_t i = 0;
 	inm_u64_t processed_len;
 
 	stag_info = (tag_info_t *)INM_KMALLOC(sizeof(tag_info_t) * num_tags,
@@ -972,7 +972,7 @@ cnvt_stream2tag_info(tag_info_t *stag_info, inm_s32_t num_tags)
 	unsigned long uuid_len = 0;
 	unsigned long *ltag_lenp = NULL;
 	unsigned short *lstag_lenp = NULL;
-	inm_u16_t i = 0;
+	inm_u32_t i = 0;
 	inm_u64_t processed_len;
 
 	tag_info = (tag_info_t *)INM_KMALLOC(sizeof(tag_info_t) * num_tags, 

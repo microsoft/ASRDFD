@@ -196,8 +196,8 @@ inm_s32_t ProcessBitRun(unsigned char * bitBuffer,
 		firstByteTouched = bitBuffer;
 		/* one of 8 offsets, same as % 8 */
 		bitOffsetInFirstByte = ((inm_u32_t)bitOffset & 0x7);
-		bitsInFirstByte = min((min(bitsInRun, (inm_u32_t)8)),
-						(8 - bitOffsetInFirstByte));
+		bitsInFirstByte = min((min(bitsInRun, (inm_u32_t)8)), // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+						(8 - bitOffsetInFirstByte)); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 		/* this code allows doing set or clear or invert of bits */
 		ch = *bitBuffer;

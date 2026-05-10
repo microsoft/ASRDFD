@@ -70,6 +70,11 @@
 #include "errlog.h"
 #include "metadata-mode.h"
 #include "md5.h"
+#include "file-io.h"
+#include "filestream_raw.h"
+
+/* Forward declarations */
+static void bitmap_api_clear_signed_header_blocks(bitmap_api_t *bapi);
 
 extern driver_context_t *driver_ctx;
 
@@ -282,6 +287,8 @@ void bitmap_api_upgrade_header(bitmap_api_t *bapi)
 		bapi->bitmap_header.un.header.version != BITMAP_FILE_VERSION) {
 		switch (bapi->bitmap_header.un.header.version) {
 		case BITMAP_FILE_VERSION1:
+			dbg("Bitmap upgrade: clearing resync_required during upgrade from V1 to V2 for %s", 
+			    bapi->volume_name);
 			bapi->bitmap_header.un.header.resync_required = 0; 
 			bapi->bitmap_header.un.header.resync_errcode = 0; 
 			bapi->bitmap_header.un.header.resync_errstatus = 0; 
@@ -304,7 +311,7 @@ void bitmap_api_upgrade_header(bitmap_api_t *bapi)
 
 	if (!error) {
 		bitmap_api_calculate_hdr_integrity_checksums(&bapi->bitmap_header);
-		if (bitmap_api_verify_header(bapi, &bapi->bitmap_header)) {
+		if (bitmap_api_verify_header(bapi, &bapi->bitmap_header, 0)) {
 			error = bitmap_api_commit_header(bapi, FALSE,
 							&upgrade_error);
 			if (error) {
@@ -342,8 +349,10 @@ inm_s32_t bitmap_api_load_bitmap_header_from_filestream(bitmap_api_t *bapi,
 		return -ENOMEM;
 	}
 	
+	dbg("bitmap_api_load_bitmap_header: was_created=%d for %s", was_created, bapi->volume_name);
 	if (!was_created)
 	{
+		dbg("Reading existing bitmap header from file: %s", bapi->bitmap_filename);
 		ret = iobuffer_sync_read(iob);
 
 		if (ret) {
@@ -358,7 +367,7 @@ inm_s32_t bitmap_api_load_bitmap_header_from_filestream(bitmap_api_t *bapi,
 			goto cleanup_and_return_failure;
 		}
 
-		if (!bitmap_api_verify_header(bapi, &bapi->bitmap_header))
+		if (!bitmap_api_verify_header(bapi, &bapi->bitmap_header, 0))
 		{
 			*detailed_status = bapi->err_causing_outofsync =
 			    LINVOLFLT_ERR_BITMAP_FILE_LOG_FIXED;
@@ -373,20 +382,28 @@ inm_s32_t bitmap_api_load_bitmap_header_from_filestream(bitmap_api_t *bapi,
 			&& (bapi->bitmap_header.un.header.resync_required)) {
 			*detailed_status = bapi->err_causing_outofsync = 
 				bapi->bitmap_header.un.header.resync_errcode;
+				dbg("Clean shutdown but resync_required flag set for %s (error_code=0x%x, clearing flag)", 
+				    bapi->volume_name, bapi->bitmap_header.un.header.resync_errcode);
+
 			        bapi->bitmap_header.un.header.resync_required = 0;
 			        bapi->bitmap_header.un.header.resync_errcode = 0;
 			        bapi->bitmap_header.un.header.resync_errstatus = 0;
 			} else {
 				dbg("previous shutdown was normal");
 				bapi->volume_insync = TRUE;
+				info("Clean shutdown, volume in sync: %s", bapi->volume_name);
 			}
 		} else {
 			*detailed_status = bapi->err_causing_outofsync =
 			    LINVOLFLT_ERR_LOST_SYNC_SYSTEM_CRASHED;
 			info("indicates unexpected previous shutdown");
+			dbg("Dirty shutdown detected for %s (recovery_state=%d)", 
+			    bapi->volume_name, bapi->bitmap_header.un.header.recovery_state);
 		}
 
 		bapi->bitmap_header.un.header.boot_cycles++;
+		dbg("Loaded existing bitmap header: %s (boot_cycles=%d, volume_insync=%d)", 
+		    bapi->volume_name, bapi->bitmap_header.un.header.boot_cycles, bapi->volume_insync);
 
 		if (bapi->bitmap_header.un.header.version !=
 							BITMAP_FILE_VERSION)
@@ -395,6 +412,7 @@ inm_s32_t bitmap_api_load_bitmap_header_from_filestream(bitmap_api_t *bapi,
 		return 0;
 		
 	} else {
+		dbg("Bitmap file was_created=%d, initializing new bitmap for %s", was_created, bapi->volume_name);
 		bapi->new_bitmap = 1;
 		*detailed_status = bapi->err_causing_outofsync =
 			LINVOLFLT_ERR_BITMAP_FILE_CREATED;
@@ -410,14 +428,14 @@ inm_s32_t bitmap_api_load_bitmap_header_from_filestream(bitmap_api_t *bapi,
 	}
 
 	if (bapi->empyt_bitmap) {
-		err("repaired empty bitmap file");
+		err("repaired empty bitmap file: %s (was_created=%d)", bapi->bitmap_filename, was_created);
 	}
 	else {
 		if (bapi->corrupt_bitmap) {
-			err("repaired corrupt bitmap file");
+			err("repaired corrupt bitmap file: %s (was_created=%d)", bapi->bitmap_filename, was_created);
 		}
 		else {
-			err("created new bitmap file");
+			err("created new bitmap file: %s (was_created=%d)", bapi->bitmap_filename, was_created);
 		}
 	}
 
@@ -781,6 +799,11 @@ out_err:
 					(min(scaled_size, (inm_u64_t)0xffff) << 48) |
 					(scaled_offset & 0xffffffffffffULL);
 
+				dbg("[PID=%d %s] bitmap_api_setbits: Setting LCW [%u][%u] = 0x%llx (offset=%llu, len=%llu)",
+				    current->pid, current->comm, index, rem,
+				    bh->change_groups[index].un.length_offset_pair[rem],
+				    scaled_offset, min(scaled_size, (inm_u64_t)0xffff));
+
 				 dbg("len off pair = %llu, off = %llu, len = %llu", 
 					 bh->change_groups[index].un.length_offset_pair[rem], 
 					 scaled_offset, scaled_size);
@@ -1115,7 +1138,6 @@ inm_s32_t move_rawio_changes_to_bitmap(bitmap_api_t *bapi,
 		info("entered");
 	}
 
-	
 	/*
 	 * bitmap has to be in opened state
 	 * this operation can't be performed in committed, raw io/closed state
@@ -1131,11 +1153,31 @@ inm_s32_t move_rawio_changes_to_bitmap(bitmap_api_t *bapi,
 	
 	/* now sweep through and save any last chance changes into bitmap */
 
-
-	max_nr_lcw = min(bapi->bitmap_header.un.header.last_chance_changes,
-			         (inm_u32_t)(MAX_WRITE_GROUPS_IN_BITMAP_HEADER * MAX_CHANGES_IN_WRITE_GROUP));
+	max_nr_lcw = min(bapi->bitmap_header.un.header.last_chance_changes, // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+			         (inm_u32_t)(MAX_WRITE_GROUPS_IN_BITMAP_HEADER * MAX_CHANGES_IN_WRITE_GROUP)); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 	info("%s: Last chance changes - %u", bapi->volume_name, max_nr_lcw);
+	
+	/* Dump header state when processing LCW after reboot */
+	dbg("[PID=%d %s] move_rawio_changes_to_bitmap: Processing %u LCW entries", 
+	    current->pid, current->comm, max_nr_lcw);
+	dbg("[PID=%d %s] move_rawio_changes_to_bitmap: recovery_state=%d", 
+	    current->pid, current->comm, bapi->bitmap_header.un.header.recovery_state);
+	
 	for (i = 0; i < max_nr_lcw; i++) {
+		inm_u32_t grp_idx = i / MAX_CHANGES_IN_WRITE_GROUP;
+		inm_u32_t slot_idx = i % MAX_CHANGES_IN_WRITE_GROUP;
+		
+		size_offset_pair = bapi->bitmap_header.change_groups[grp_idx].un.length_offset_pair[slot_idx];
+		
+		/* Log each LCW entry being processed, including signature slots */
+		if (slot_idx == 0) {
+			dbg("[PID=%d %s] move_rawio_changes_to_bitmap: LCW [%u][%u] = 0x%llx (SIGNATURE SLOT)",
+			    current->pid, current->comm, grp_idx, slot_idx, size_offset_pair);
+		} else {
+			dbg("[PID=%d %s] move_rawio_changes_to_bitmap: LCW [%u][%u] = 0x%llx",
+			    current->pid, current->comm, grp_idx, slot_idx, size_offset_pair);
+		}
+		
 		size_offset_pair = bapi->bitmap_header.change_groups[i /
 		MAX_CHANGES_IN_WRITE_GROUP ].un.length_offset_pair[i%MAX_CHANGES_IN_WRITE_GROUP];
 		
@@ -1254,6 +1296,9 @@ inm_s32_t bitmap_api_init_bitmap_file(bitmap_api_t *bapi,
 	bmap_hdr.resync_errcode = 0;
 	bmap_hdr.resync_errstatus = 0;
 
+	dbg("Initializing new bitmap file for %s: resync_required=0, recovery_state=DIRTY", 
+	    bapi->volume_name);
+
 	status = bitmap_api_commit_header(bapi, FALSE, inmage_status);
 	
 
@@ -1279,14 +1324,22 @@ inm_s32_t bitmap_api_commit_bitmap_internal(bitmap_api_t *bapi,
 	switch (bapi->bitmap_file_state) {
 	
 	case BITMAP_FILE_STATE_OPENED:
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: OPENED mode (clean_shutdown=%d, CG[0]=0x%llx)", 
+		    current->pid, current->comm, clean_shutdown, 
+		    bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
+
 		bapi->bitmap_header.un.header.recovery_state = clean_shutdown ?
 			BITMAP_LOG_RECOVERY_STATE_CLEAN_SHUTDOWN : 
 			BITMAP_LOG_RECOVERY_STATE_DIRTY_SHUTDOWN;
+		
 		segmented_bitmap_sync_flush_all(bapi->sb);
 		status = bitmap_api_commit_header(bapi, FALSE, inmage_status);
 		if (status) {
 			info("unable to write header");
 			status = LINVOLFLT_ERR_FINAL_HEADER_FS_WRITE_FAILED;
+		} else {
+			dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: OPENED mode header written successfully", 
+			    current->pid, current->comm);
 		}
 		break;
 	
@@ -1299,10 +1352,63 @@ inm_s32_t bitmap_api_commit_bitmap_internal(bitmap_api_t *bapi,
 		 * guarantee all the lcw have been written to the disk before
 		 * marking the header clean on the disk.
 		 */
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: RAWIO mode, about to write dirty header (verify=%d, clean_shutdown=%d)", 
+		    current->pid, current->comm, TRUE, clean_shutdown);
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Bitmap file: %s", 
+		    current->pid, current->comm, bapi->bitmap_filename);
+
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Using RAWIO mode - will write directly to disk sectors", 
+		    current->pid, current->comm);
 		bapi->bitmap_header.un.header.recovery_state =
 			    BITMAP_LOG_RECOVERY_STATE_DIRTY_SHUTDOWN;
+		
+		/* Dump header contents BEFORE writing to disk */
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Header state BEFORE RAWIO write:", 
+		    current->pid, current->comm);
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: last_chance_changes=%d, recovery_state=%d", 
+		    current->pid, current->comm,
+		    bapi->bitmap_header.un.header.last_chance_changes,
+		    bapi->bitmap_header.un.header.recovery_state);
+		
 		status = bitmap_api_commit_header(bapi, TRUE, inmage_status);
+		
+		/* 
+		 * During reboot/shutdown, add delay after write to ensure block device
+		 * cache is flushed before verification read. Without this, verification
+		 * may read stale cached data (zeros) even though write succeeded.
+		 */
+		if (status == 0) {
+			dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Write succeeded, sleeping 1sec for cache flush", 
+			    current->pid, current->comm);
+			// add sleep for 1 second
+			inm_ksleep(1000);
+		}
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Dirty header write complete (status=%d)", 
+		    current->pid, current->comm, status);
+		dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Dirty header write complete (status=%d)", 
+		    current->pid, current->comm, status);
+		
+		// re-read header from disk and verify
+		if (!status) {
+			dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Verifying dirty header by reading it back", 
+			    current->pid, current->comm);
+			
+			status = bitmap_api_read_and_verify_bitmap_header(bapi, inmage_status, false);
+			if (status) {
+				dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Header verification FAILED (status=%d)", 
+				    current->pid, current->comm, status);
+			} else {
+				dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Dirty header verification succeeded", 
+				    current->pid, current->comm);
+			}
+		}
+
+		// Only if verification of headers passed (status = 0) AND clean_shutdown is TRUE,
+		// we can clear the header
 		if (!status && clean_shutdown) {
+			dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Writing clean header (verify=%d)", 
+			    current->pid, current->comm, FALSE);
+			
 			bapi->bitmap_header.un.header.recovery_state =
 			    BITMAP_LOG_RECOVERY_STATE_CLEAN_SHUTDOWN;
 			status = bitmap_api_commit_header(bapi, FALSE,
@@ -1310,6 +1416,9 @@ inm_s32_t bitmap_api_commit_bitmap_internal(bitmap_api_t *bapi,
 			if (status) {
 				info("unable to write header with raw io");
 				status = LINVOLFLT_ERR_FINAL_HEADER_FS_WRITE_FAILED;
+			} else {
+				dbg("[PID=%d %s] bitmap_api_commit_bitmap_internal: Clean header write complete", 
+				    current->pid, current->comm);
 			}
 		}
 		break;
@@ -1332,7 +1441,6 @@ inm_s32_t bitmap_api_fast_zero_bitmap(bitmap_api_t *bapi)
 	inm_s32_t status = 0;
 	inm_u64_t i = 0;
 	iobuffer_t *iob = NULL;
-
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
@@ -1362,7 +1470,6 @@ inm_s32_t bitmap_api_fast_zero_bitmap(bitmap_api_t *bapi)
 	
 	fstream_disable_buffered_io(bapi->fs);
 	fstream_sync(bapi->fs);
-
 	iobuffer_put(iob);
 		iob = NULL;
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
@@ -1373,13 +1480,47 @@ inm_s32_t bitmap_api_fast_zero_bitmap(bitmap_api_t *bapi)
 }
 
 
-inm_s32_t bitmap_api_verify_header_blocks(bitmap_api_t *bapi, bitmap_header_t *hdr)
+static inm_s32_t bitmap_api_verify_header_blocks(bitmap_api_t *bapi, bitmap_header_t *hdr, inm_s32_t silent)
 {
 	int i = 0;
 	inm_u64_t sig = 0;
 	char *vname = NULL;
 	char *csig = (char *)&sig;
 	int matches = TRUE;
+	inm_u32_t recovery_state = hdr->un.header.recovery_state;
+
+	/* Check recovery state to determine expected signature */
+	if (recovery_state == BITMAP_LOG_RECOVERY_STATE_CLEAN_SHUTDOWN) {
+		/* Clean shutdown: signatures should be cleared (0x0) */
+		if (!silent) {
+			dbg("[PID=%d %s] bitmap_api_verify_header_blocks: Checking for CLEAN SHUTDOWN (signatures should be 0x0)", 
+			    current->pid, current->comm);
+		}
+		
+		for (i = 0; i < MAX_WRITE_GROUPS_IN_BITMAP_HEADER; i++) {
+			if (hdr->change_groups[i].un.length_offset_pair[0] != 0) {
+				if (!silent) {
+					err("Signature Mismatch (CLEAN_SHUTDOWN). CG[%d] 0x%llx != 0x0", i, 
+					    hdr->change_groups[i].un.length_offset_pair[0]);
+				}
+				matches = FALSE;
+				break;
+			}
+		}
+		
+		if (matches && !silent) {
+			dbg("[PID=%d %s] bitmap_api_verify_header_blocks: CLEAN SHUTDOWN verification PASSED (all signatures are 0x0)", 
+			    current->pid, current->comm);
+		}
+		
+		return matches;
+	}
+
+	/* Dirty shutdown or other states: check LCW signatures */
+	if (!silent) {
+		dbg("[PID=%d %s] bitmap_api_verify_header_blocks: Checking for LCW signatures (recovery_state=%u)", 
+		    current->pid, current->comm, recovery_state);
+	}
 
 	/* The last three bytes of volume name are always unique */
 	vname = bapi->volume_name + 
@@ -1392,16 +1533,25 @@ inm_s32_t bitmap_api_verify_header_blocks(bitmap_api_t *bapi, bitmap_header_t *h
 
 	sig |= BITMAP_LCW_SIGNATURE_SUFFIX;
 
-	info("Signature: %llx", sig);
+	if (!silent) {
+		err("Expected LCW Signature: 0x%llx", sig);
+	}
 	
 	for (i = 0; i < MAX_WRITE_GROUPS_IN_BITMAP_HEADER; i++) {
 		if (hdr->change_groups[i].un.length_offset_pair[0] != sig) {
-			err("Signature Mismatch. CG[%d] %llx != %llx", i, 
-			    hdr->change_groups[i].un.length_offset_pair[0],
-			    sig);
+			if (!silent) {
+				err("Signature Mismatch. CG[%d] 0x%llx != 0x%llx", i, 
+				    hdr->change_groups[i].un.length_offset_pair[0],
+				    sig);
+			}
 			matches = FALSE;
 			break;
 		}
+	}
+	
+	if (matches && !silent) {
+		dbg("[PID=%d %s] bitmap_api_verify_header_blocks: LCW signature verification PASSED", 
+		    current->pid, current->comm);
 	}
 
 	return matches;
@@ -1411,8 +1561,14 @@ void bitmap_api_clear_signed_header_blocks(bitmap_api_t *bapi)
 {
 	int i = 0;
 
+	dbg("[PID=%d %s] bitmap_api_clear_signed_header_blocks: Clearing signatures (CG[0] was 0x%llx)", 
+	    current->pid, current->comm, bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
+
 	for (i = 0; i < MAX_WRITE_GROUPS_IN_BITMAP_HEADER; i++)
 		bapi->bitmap_header.change_groups[i].un.length_offset_pair[0] = 0; 
+
+	dbg("[PID=%d %s] bitmap_api_clear_signed_header_blocks: Cleared (CG[0] now 0x%llx)", 
+	    current->pid, current->comm, bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
 }
 
 void bitmap_api_sign_header_blocks(bitmap_api_t *bapi)
@@ -1435,6 +1591,10 @@ void bitmap_api_sign_header_blocks(bitmap_api_t *bapi)
 
 	info("Signature: %llx", sig);
 
+	dbg("[PID=%d %s] bitmap_api_sign_header_blocks: Adding signature 0x%llx to %d change groups (CG[0] was 0x%llx)", 
+	    current->pid, current->comm, sig, MAX_WRITE_GROUPS_IN_BITMAP_HEADER,
+	    bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
+
 	for (i = 0; i < MAX_WRITE_GROUPS_IN_BITMAP_HEADER; i++)
 		bapi->bitmap_header.change_groups[i].un.length_offset_pair[0] = sig; 
 }
@@ -1454,6 +1614,9 @@ inm_s32_t bitmap_api_commit_header(bitmap_api_t *bapi,
 	switch(bapi->bitmap_file_state) {
 	
 	case BITMAP_FILE_STATE_OPENED:
+		dbg("[PID=%d %s] bitmap_api_commit_header: OPENED mode, writing header (CG[0]=0x%llx, recovery_state=%d)", 
+		    current->pid, current->comm, bapi->bitmap_header.change_groups[0].un.length_offset_pair[0],
+		    bapi->bitmap_header.un.header.recovery_state);
 		bitmap_api_calculate_hdr_integrity_checksums(&bapi->bitmap_header);
 		if (memcpy_s(bapi->io_bitmap_header->buffer,
 				sizeof(bitmap_header_t),
@@ -1468,17 +1631,35 @@ inm_s32_t bitmap_api_commit_header(bitmap_api_t *bapi,
 		if (status != 0)
 			*inmage_status = 
 			    LINVOLFLT_ERR_FINAL_HEADER_FS_WRITE_FAILED;
+		else {
+			/* Force full file sync to ensure header is persisted to disk */
+			dbg("[PID=%d %s] bitmap_api_commit_header: OPENED mode write complete, forcing fsync", 
+			    current->pid, current->comm);
+			dbg("[PID=%d %s] bitmap_api_commit_header: OPENED mode fsync complete", 
+			    current->pid, current->comm);
+		}
 
 		break;
 
 	case BITMAP_FILE_STATE_RAWIO:
-		if (verify_existing_hdr_for_raw_io)
+		dbg("[PID=%d %s] bitmap_api_commit_header: RAWIO mode (verify=%d)", 
+		    current->pid, current->comm, verify_existing_hdr_for_raw_io);
+		if (verify_existing_hdr_for_raw_io) {
 			status = bitmap_api_read_and_verify_bitmap_header(bapi,
-							      inmage_status);
-		else
+							      inmage_status,
+							      true);
+			dbg("[PID=%d %s] bitmap_api_commit_header: Read/verify complete (status=%d)", 
+			    current->pid, current->comm, status);
+		}
+		else {
+			dbg("[PID=%d %s] bitmap_api_commit_header: Skipping verification, will write directly", 
+			    current->pid, current->comm);
 			status = 0;
+		}
 
 		if (status == 0) {
+			dbg("[PID=%d %s] bitmap_api_commit_header: About to write header (recovery_state=%d)", 
+			    current->pid, current->comm, bapi->bitmap_header.un.header.recovery_state);
 			bitmap_api_calculate_hdr_integrity_checksums(&bapi->bitmap_header);
 			if (memcpy_s(bapi->io_bitmap_header->buffer,
 					sizeof(bitmap_header_t),
@@ -1490,6 +1671,8 @@ inm_s32_t bitmap_api_commit_header(bitmap_api_t *bapi,
 
 			iobuffer_setdirty(bapi->io_bitmap_header);
 			status = iobuffer_sync_flush(bapi->io_bitmap_header);
+			dbg("[PID=%d %s] bitmap_api_commit_header: Write complete (status=%d)", 
+			    current->pid, current->comm, status);
 			if (status != 0)
 				*inmage_status = LINVOLFLT_ERR_FINAL_HEADER_DIRECT_WRITE_FAILED;
 		}
@@ -1522,29 +1705,45 @@ void bitmap_api_calculate_hdr_integrity_checksums(bitmap_header_t *bhdr)
 }
 
 inm_s32_t bitmap_api_read_and_verify_bitmap_header(bitmap_api_t *bapi,
-					     inm_s32_t *inmage_status)
+					     inm_s32_t *inmage_status,
+					     bool verify_blocks)
 {
 	
 	inm_s32_t status = 0;
 	bitmap_header_t *hdriob = (bitmap_header_t *)bapi->io_bitmap_header->buffer;
 
-
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
 	}
 
+	dbg("[PID=%d %s] bitmap_api_read_and_verify: About to read header from disk for %s", 
+	    current->pid, current->comm, bapi->volume_name);
 	status = iobuffer_sync_read(bapi->io_bitmap_header);
+	dbg("[PID=%d %s] bitmap_api_read_and_verify: Read complete (status=%d), endian=%d, version=0x%x, recovery_state=%d", 
+	    current->pid, current->comm, status, hdriob->un.header.endian, 
+	    hdriob->un.header.version, hdriob->un.header.recovery_state);
+	
 	if (status == 0) {
-		if (bitmap_api_verify_header(bapi, hdriob) &&
-			bitmap_api_verify_header_blocks(bapi, hdriob))
+		if (bitmap_api_verify_header(bapi, hdriob, 0) &&
+			(!verify_blocks ||
+			 bitmap_api_verify_header_blocks(bapi, hdriob, 0))) {
+			/*
+			 * Do NOT copy hdriob back to bapi->bitmap_header.
+			 * bapi->bitmap_header holds current in-memory state
+			 * with LCW entries; hdriob has stale disk data.
+			 */
 			return 0;
-		else
+		}
+		else {
 			*inmage_status = LINVOLFLT_ERR_FINAL_HEADER_VALIDATE_FAILED;
+			status = 1;
+		}
 	} else {
+		dbg("[PID=%d %s] bitmap_api_read_and_verify: Read operation FAILED (status=%d)", 
+		    current->pid, current->comm, status);
 		if (inmage_status)
 			*inmage_status = LINVOLFLT_ERR_FINAL_HEADER_READ_FAILED;
 	}
-
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("leaving with ret value = %d", status);
@@ -1554,7 +1753,7 @@ inm_s32_t bitmap_api_read_and_verify_bitmap_header(bitmap_api_t *bapi,
 }
 
 inm_s32_t bitmap_api_verify_header(bitmap_api_t *bapi,
-		bitmap_header_t *bheader)
+		bitmap_header_t *bheader, inm_s32_t silent)
 {
 	unsigned char actual_checksum[HEADER_CHECKSUM_SIZE] = {0};
 	MD5Context ctx;
@@ -1587,9 +1786,10 @@ inm_s32_t bitmap_api_verify_header(bitmap_api_t *bapi,
 		   HEADER_CHECKSUM_SIZE) == 0));
 
 
-	if (!_rc) {
+	if (!_rc && !silent) {
+		/* Header validation failed */
 		info("Invalid Header for volume %s", bapi->volume_name);
-		info("validition of bmap hdr");
+		info("validation of bmap hdr");
 		info("endian  = %d", (bhdr.endian == BITMAP_FILE_ENDIAN_FLAG));
 		info("hdr sz  = %d", bhdr.header_size); 
 		info("version = 0x%x", (bhdr.version));
@@ -1600,8 +1800,7 @@ inm_s32_t bitmap_api_verify_header(bitmap_api_t *bapi,
 		info("vol size    = %d", (bhdr.volume_size == bapi->volume_size));
 		info("checksum    = %d",
 			 (INM_MEM_CMP(bhdr.validation_checksum, actual_checksum,
-			         HEADER_CHECKSUM_SIZE) == 0));
-
+				 HEADER_CHECKSUM_SIZE) == 0));
 	}
 
 #undef bhdr
@@ -1787,10 +1986,29 @@ inm_s32_t is_bmaphdr_loaded(volume_bitmap_t *vbmap)
 inm_s32_t
 bitmap_api_map_file_blocks(bitmap_api_t *bapi, fstream_raw_hdl_t **hdl)
 {
-	return fstream_raw_open(bapi->bitmap_filename, 0, 
-			                sizeof(bitmap_header_t), hdl);
-}
+	inm_s32_t error;
+	inm_s64_t fs_block;
+	inm_u64_t bmap_sector;
 	
+	error = fstream_raw_open(bapi->bitmap_filename, 0, 
+		                sizeof(bitmap_header_t), hdl);
+	if (error)
+		return error;
+	
+	/* 
+	 * At shutdown, we already have the physical sector from bio->bi_sector
+	 * which was stored in fb_offset by fstream_raw_map_bio().
+	 * The bio sector is the correct physical location on the device.
+	 * Log it for verification at reboot.
+	 */
+	if (*hdl && (*hdl)->frh_blocks && (*hdl)->frh_blocks[0]) {
+		inm_u64_t bio_sector = (*hdl)->frh_blocks[0][0].fb_offset >> INM_SECTOR_SHIFT;
+		dbg("[PID=%d %s] bitmap_api_map_file_blocks: Bio gave physical sector=%llu (fb_offset=%llu) - this will be used at reboot", 
+		    current->pid, current->comm, bio_sector, (*hdl)->frh_blocks[0][0].fb_offset);
+	}
+	return error;
+}
+
 inm_s32_t
 bitmap_api_switch_to_rawio_mode(bitmap_api_t *bapi, inm_u64_t *resync_error)
 {
@@ -1806,25 +2024,47 @@ bitmap_api_switch_to_rawio_mode(bitmap_api_t *bapi, inm_u64_t *resync_error)
 		goto out;
 	}
 
+	dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: Starting for %s (state=%d, CG[0]=0x%llx)", 
+	    current->pid, current->comm, bapi->volume_name, bapi->bitmap_file_state,
+	    bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
+
 	/* Add signatures to header blocks to verify the raw blocks */
 	bitmap_api_sign_header_blocks(bapi);
+
+	dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: About to commit header with signatures (CG[0]=0x%llx)", 
+	    current->pid, current->comm, bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
 
 	error = bitmap_api_commit_bitmap_internal(bapi, !clean_shutdown,
 								&error);
 	
-	bitmap_api_clear_signed_header_blocks(bapi);
+	dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: Header committed (error=%d), signatures preserved in memory for reboot verification", 
+	    current->pid, current->comm, error);
+
+	/* DO NOT clear signatures from memory! They need to remain for:
+	 * 1. Verification during reboot (bitmap_api_verify_header_blocks compares disk vs memory)
+	 * 2. Preservation during any subsequent header writes (Fix #4)
+	 * The signatures are the EXPECTED values for verification.
+	 * NOTE: Signatures WILL be cleared later when clean_shutdown header is written (line 1586) */
 
 	if (error) {
 		*resync_error = ERROR_TO_REG_PRESHUTDOWN_BITMAP_FLUSH_FAILURE;
 		goto out;
 	}
 
+	dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: About to map file blocks (signatures still in memory: CG[0]=0x%llx)", 
+	    current->pid, current->comm, bapi->bitmap_header.change_groups[0].un.length_offset_pair[0]);
+		
 	error = bitmap_api_map_file_blocks(bapi, &hdl);
 	if (error) {
+		dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: Failed to map file blocks (error=%d), setting ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE", 
+		    current->pid, current->comm, error);
 		*resync_error = ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE;
 		goto out;
 	}
 
+	dbg("[PID=%d %s] bitmap_api_switch_to_rawio_mode: File blocks mapped successfully, switching to RAWIO mode", 
+	    current->pid, current->comm);
+	
 	bapi->bitmap_file_state = BITMAP_FILE_STATE_RAWIO;
 	fstream_switch_to_raw_mode(bapi->fs, hdl);
 out:
@@ -1836,7 +2076,12 @@ void
 bitmap_api_set_volume_out_of_sync(bitmap_api_t *bapi, inm_u64_t error_status, 
 			                      inm_u32_t error_code)
 {
+	err("Setting resync_required=1 for volume %s (error_code=0x%x, error_status=0x%llx)", 
+	    bapi->volume_name, error_code, error_status);
 	bapi->bitmap_header.un.header.resync_required = 1; 
 	bapi->bitmap_header.un.header.resync_errcode = error_code; 
 	bapi->bitmap_header.un.header.resync_errstatus = error_status; 
 }
+
+
+

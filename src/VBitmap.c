@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -76,6 +76,10 @@ volume_bitmap_t *open_bitmap_file(target_context_t *vcptr, inm_s32_t *status)
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered - target volume %p (%s)\n", vcptr, vcptr->tc_guid);
 	}
+	
+	dbg("[PID=%d %s] open_bitmap_file: Starting for %s (tc_flags=0x%x)", 
+		current->pid, current->comm, vcptr->tc_guid, vcptr->tc_flags);
+	
 	if (is_rootfs_ro()) {
 		err("Root filesystem is RO. Retry bitmap open later..");
 		return NULL;
@@ -226,6 +230,16 @@ void close_bitmap_file(volume_bitmap_t *vbmap, inm_s32_t clear_bitmap) {
 	inm_s32_t wait_for_notification = FALSE;
 	inm_s32_t set_bits_work_item_list_empty = FALSE;
 	unsigned long lock_flag = 0;
+	
+	dbg("[PID=%d %s] close_bitmap_file: ENTRY vbmap=%p, clear_bitmap=%d, refcnt=%d, state=%d", 
+	    current->pid, current->comm, vbmap, clear_bitmap, 
+	    vbmap ? INM_ATOMIC_READ(&vbmap->refcnt) : 0,
+	    vbmap ? vbmap->eVBitmapState : -1);
+	
+	if (vbmap && vbmap->bitmap_api && vbmap->bitmap_api->bitmap_filename) {
+		dbg("[PID=%d %s] close_bitmap_file: Bitmap file: %s", 
+		    current->pid, current->comm, vbmap->bitmap_api->bitmap_filename);
+	}
 	
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
@@ -1601,6 +1615,8 @@ get_volume_bitmap_state_string(etVBitmapState bmap_state)
 void close_bitmap_file_on_tgt_ctx_deletion(volume_bitmap_t *vbmap,
 				target_context_t *vcptr)
 {
+	dbg("[PID=%d %s] close_bitmap_file_on_tgt_ctx_deletion: Setting tc_bp->volume_bitmap=NULL for %s (vbmap=%p, refcount=%d)", 
+	    current->pid, current->comm, vcptr->tc_guid, vbmap, vbmap ? INM_ATOMIC_READ(&vbmap->refcnt) : 0);
 	close_bitmap_file(vbmap, TRUE);
 	vcptr->tc_bp->volume_bitmap = NULL;
 }
@@ -1666,6 +1682,9 @@ void process_vcontext_work_items(wqentry_t *wqeptr)
 			if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 				info(" opening bitmap for volume %s\n", vcptr->tc_guid);
 			}
+			
+			dbg("[PID=%d %s] service_thread_worker_routine: About to open bitmap for %s (witem_type=WITEM_TYPE_OPEN_BITMAP)", 
+			    current->pid, current->comm, vcptr->tc_guid);
 
 			vbmap = open_bitmap_file(vcptr, &status);
 			volume_lock(vcptr);
@@ -2215,7 +2234,7 @@ inm_s32_t queue_worker_routine_for_bitmap_write(target_context_t *vcptr,
 			while (!inm_list_empty(&change_node->changes.md_pg_list)) {
 				inm_page_t *pgp = NULL;
 
-				nr_chgs = min((inm_u32_t)rem, (inm_u32_t)MAX_CHANGE_INFOS_PER_PAGE);
+				nr_chgs = min((inm_u32_t)rem, (inm_u32_t)MAX_CHANGE_INFOS_PER_PAGE); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 
 				pgp = inm_list_entry(change_node->changes.md_pg_list.next,inm_page_t, entry);
 				inm_list_del(&pgp->entry);
@@ -2286,6 +2305,11 @@ void flush_and_close_bitmap_file(target_context_t *vcptr)
 	inmage_flt_save_all_changes(vcptr, TRUE, INM_NO_OP);
 	volume_lock(vcptr);
 	vbmap = vcptr->tc_bp->volume_bitmap;
+	dbg("[PID=%d %s] flush_and_close_bitmap_file: Setting tc_bp->volume_bitmap=NULL for %s (vbmap=%p, refcount=%d)", 
+	    current->pid, current->comm, vcptr->tc_guid, vbmap, vbmap ? INM_ATOMIC_READ(&vbmap->refcnt) : 0);
+	dbg("[PID=%d %s] flush_and_close_bitmap_file: Caller=%pS Parent=%pS", 
+	    current->pid, current->comm, __builtin_return_address(0), __builtin_return_address(1));
+	dbg("[PID=%d %s] flush_and_close_bitmap_file: Call stack:", current->pid, current->comm);
 	vcptr->tc_bp->volume_bitmap = NULL;
 	volume_unlock(vcptr);
 

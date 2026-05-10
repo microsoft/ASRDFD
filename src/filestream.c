@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -200,30 +200,44 @@ inm_s32_t fstream_open_or_create(fstream_t *fs, char *path,
 {
 	inm_s32_t ret = 0, c_ret = 0;
 	inm_s32_t oflags = (O_RDWR | O_EXCL | O_LARGEFILE | O_NOATIME);
+	inm_s32_t fsize = 0;
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
 	}
 
+	dbg("[PID=%d %s] fstream_open_or_create: Attempting to open bitmap file: %s (expected size: %u bytes)", 
+	    current->pid, current->comm, path, bmap_sz);
 	ret = fstream_open(fs, path, oflags, 0644);
 
 	if (ret) {    // may be file does not exist, create it
+		dbg("Bitmap file not found (ret=%d), attempting to create: %s", ret, path);
 		oflags |= O_CREAT;
 		c_ret = fstream_open(fs, path, oflags, 0644);
 		if (c_ret) {
-			if (c_ret == -EEXIST)
+			if (c_ret == -EEXIST) {
+				err("Bitmap file creation race condition (EEXIST): %s", path);
 				return ret;
-			else
+			} else {
+				err("Failed to create bitmap file (ret=%d): %s", c_ret, path);
 				return c_ret;
+			}
 		} else {
 			ret = c_ret;
 		}
 
 		*file_created = 1;
+		dbg("Created new bitmap file (file_created=1): %s", path);
 	} else {
-		if (fstream_get_fsize(fs) < bmap_sz) {
+		fsize = fstream_get_fsize(fs);
+		dbg("Bitmap file exists: %s (actual size: %d, expected: %u)", path, fsize, bmap_sz);
+		if (fsize < bmap_sz) {
 			//bmap file corrupted
 			*file_created = 2;
+			err("Bitmap file truncated/corrupted (file_created=2): %s (size: %d < %u)", 
+			    path, fsize, bmap_sz);
+		} else {
+			dbg("Bitmap file size OK (file_created=0): %s", path);
 		}
 	}
 
@@ -287,8 +301,19 @@ inm_s32_t fstream_write(fstream_t *fs, char *buffer, inm_u32_t size,
 		info("entered");
 	}
 
-	if (fs->fs_raw_hdl)
+	/* Log RAWIO writes */
+	if (offset == 0 && size == 16384) {
+		dbg("[PID=%d %s] fstream_write: offset=%llu, size=%u, fs_raw_hdl=%p", 
+		    current->pid, current->comm, offset, size, fs->fs_raw_hdl);
+	}
+
+	if (fs->fs_raw_hdl) {
+		if (offset == 0 && size == 16384) {
+			dbg("[PID=%d %s] fstream_write: Calling fstream_raw_write", 
+			    current->pid, current->comm);
+		}
 		return fstream_raw_write(fs->fs_raw_hdl, buffer, size, offset);
+	}
 
 	if (!fp)
 		return 1;

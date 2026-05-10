@@ -93,6 +93,46 @@ isrootdev(target_context_t *vcptr)
 	return isroot;
 }
 
+/*
+ * try_set_root_disk - Identify and set the root disk context.
+ *
+ * Must be called from process context (not under spinlocks) as isrootvol()
+ * calls convert_path_to_dev() which may sleep. This replaces the lazy
+ * get_root_disk() call that was previously in is_our_io(), which could sleep
+ * inside an RCU read-side critical section when called from blk-mq
+ * (inm_queue_rq).
+ */
+void
+try_set_root_disk(target_context_t *ctx)
+{
+	if (driver_ctx->dc_root_disk)
+		return;
+
+	if (!driver_ctx->root_dev)
+		return;
+
+	if (!(driver_state & DRV_LOADED_FULLY))
+		return;
+
+	if (!isrootvol(ctx))
+		return;
+
+	INM_DOWN_WRITE(&driver_ctx->tgt_list_sem);
+	volume_lock(ctx);
+
+	if (!driver_ctx->dc_root_disk &&
+		!(ctx->tc_flags & (VCF_VOLUME_DELETING | VCF_VOLUME_CREATING)) &&
+		!(ctx->tc_flags & VCF_ROOT_DEV)) {
+		driver_ctx->dc_root_disk = ctx;
+		ctx->tc_flags |= VCF_ROOT_DEV;
+		info("Root disk identified: %s (%s)", ctx->tc_guid,
+							ctx->tc_pname);
+	}
+
+	volume_unlock(ctx);
+	INM_UP_WRITE(&driver_ctx->tgt_list_sem);
+}
+
 void
 init_volume_fully(target_context_t *tgt_ctxt, inm_dev_extinfo_t *dev_info)
 {
@@ -116,6 +156,8 @@ init_volume_fully(target_context_t *tgt_ctxt, inm_dev_extinfo_t *dev_info)
 		volume_lock(tgt_ctxt);
 		tgt_ctxt->tc_flags &= ~VCF_VOLUME_STACKED_PARTIALLY;
 		volume_unlock(tgt_ctxt);
+
+		try_set_root_disk(tgt_ctxt);
 }   
 	
 int
@@ -265,6 +307,8 @@ retry:
 		ctx->tc_flags |= VCF_IN_NWO;
 		volume_unlock(ctx);
 
+		try_set_root_disk(ctx);
+
 		INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_vm_cx_session_lock,
 				driver_ctx->dc_vm_cx_session_lock_flag);
 		add_disk_sess_to_dc(ctx);
@@ -315,6 +359,7 @@ retry:
 		inm_free_host_dev_ctx(hdcp);
 	}
 
+
 	if(IS_DBG_ENABLED(inm_verbosity, INM_IDEBUG)){
 		info("do_volume_stacking: leaving err:%d", err);
 	}
@@ -361,8 +406,10 @@ retry:
 #ifdef INM_AIX
 		INM_SPIN_UNLOCK(&driver_ctx->tgt_list_lock, ipl);
 #endif
-		if (driver_ctx->dc_root_disk == tgt_ctxt)
+		if (driver_ctx->dc_root_disk == tgt_ctxt) {
 			driver_ctx->dc_root_disk = NULL;
+			err("do_unstack_all: set dc_root_disk to NULL\n");
+		}
 		INM_UP_WRITE(&(driver_ctx->tgt_list_sem));
 
 		if(tgt_ctxt->tc_dev_type == FILTER_DEV_FABRIC_LUN)
@@ -490,6 +537,9 @@ do_start_filtering(inm_devhandle_t *idhp, inm_dev_extinfo_t *dev_infop)
 	}
 
 		volume_unlock(ctx);
+
+		try_set_root_disk(ctx);
+
 		if (flt_on) {
 			set_int_vol_attr(ctx, VolumeFilteringDisabled, 0);
 			set_unsignedlonglong_vol_attr(ctx, VolumeRpoTimeStamp,

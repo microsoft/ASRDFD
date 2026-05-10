@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -193,6 +193,8 @@ inm_s32_t queue_worker_routine_for_set_volume_out_of_sync(target_context_t *vcpt
 		return -EINVAL;
 	}
 
+	dbg("Queue worker: setting tc_resync_required=TRUE for %s (will be processed async, error_code=%lld, status=%d)", 
+	    vcptr->tc_guid, out_of_sync_error_code, status);
 	vcptr->tc_resync_required = TRUE;
 	vcptr->tc_out_of_sync_err_code = out_of_sync_error_code;
 	vcptr->tc_nr_out_of_sync++;
@@ -242,6 +244,15 @@ inm_s32_t stop_filtering_device(target_context_t *vcptr,
 	get_time_stamp(&(vcptr->tc_tel.tt_stop_flt_time)); 
 	
 	vbmap = vcptr->tc_bp->volume_bitmap;
+	
+	dbg("[PID=%d %s] stop_filtering_device: Setting tc_bp->volume_bitmap=NULL for %s (vbmap=%p, refcount=%d, lock_acquired=%d, state=%d)", 
+	    current->pid, current->comm, vcptr->tc_guid, vbmap, vbmap ? INM_ATOMIC_READ(&vbmap->refcnt) : 0, lock_acquired,
+	    vbmap ? vbmap->eVBitmapState : -1);
+	
+	if (vbmap && vbmap->bitmap_api && vbmap->bitmap_api->bitmap_filename) {
+		dbg("[PID=%d %s] stop_filtering_device: Bitmap file path: %s", 
+		    current->pid, current->comm, vbmap->bitmap_api->bitmap_filename);
+	}
 	
 	vcptr->tc_bp->volume_bitmap = NULL;
 

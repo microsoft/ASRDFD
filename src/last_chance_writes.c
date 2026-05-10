@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -47,7 +47,8 @@ lcw_move_bitmap_to_raw_mode(target_context_t *tgt_ctxt)
 	volume_bitmap_t     *vbmap = NULL;
 	bitmap_api_t        *bapi = NULL;
 
-	err("Switching bitmap file to rawio mode for %s", tgt_ctxt->tc_guid);
+	err("[PID=%d %s] Switching bitmap file to rawio mode for %s", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid);
 
 	inmage_flt_save_all_changes(tgt_ctxt, TRUE, INM_NO_OP);
 
@@ -55,21 +56,31 @@ lcw_move_bitmap_to_raw_mode(target_context_t *tgt_ctxt)
 	if(tgt_ctxt->tc_bp->volume_bitmap) {
 		get_volume_bitmap(tgt_ctxt->tc_bp->volume_bitmap);
 		vbmap = tgt_ctxt->tc_bp->volume_bitmap;
+		dbg("[PID=%d %s] lcw_move_bitmap_to_raw_mode: Got vbmap reference for %s (vbmap=%p, refcount=%d)", 
+		    current->pid, current->comm, tgt_ctxt->tc_guid, vbmap, INM_ATOMIC_READ(&vbmap->refcnt));
 	}
 	volume_unlock(tgt_ctxt);
 		
 	if (!vbmap) {
+		err("[PID=%d %s] lcw_move_bitmap_to_raw_mode: No vbmap for %s - returning ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE", 
+		    current->pid, current->comm, tgt_ctxt->tc_guid);
 		resync_error = ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE;
 		error = LINVOLFLT_ERR_DELETE_BITMAP_FILE_NO_NAME;
 		goto out;
 	}
 
+	dbg("[PID=%d %s] lcw_move_bitmap_to_raw_mode: About to lock vbmap->sem for %s (vbmap=%p, refcount=%d, state=%d)", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid, vbmap, INM_ATOMIC_READ(&vbmap->refcnt), vbmap->eVBitmapState);
 	INM_DOWN(&vbmap->sem);
+	dbg("[PID=%d %s] lcw_move_bitmap_to_raw_mode: Acquired vbmap->sem for %s (vbmap=%p, refcount=%d, state=%d)", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid, vbmap, INM_ATOMIC_READ(&vbmap->refcnt), vbmap->eVBitmapState);
 
 	if (vbmap->eVBitmapState != ecVBitmapStateClosed) {
 		bapi = tgt_ctxt->tc_bp->volume_bitmap->bitmap_api;
 		error = bitmap_api_switch_to_rawio_mode(bapi, &resync_error);
 	} else {
+		err("[PID=%d %s] lcw_move_bitmap_to_raw_mode: Bitmap already closed for %s (state=%d), setting ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE", 
+		    current->pid, current->comm, tgt_ctxt->tc_guid, vbmap->eVBitmapState);
 		resync_error = ERROR_TO_REG_LEARN_PHYSICAL_IO_FAILURE;
 		error = LINVOLFLT_ERR_BITMAP_FILE_CANT_OPEN;
 	}
@@ -89,30 +100,53 @@ lcw_flush_volume_changes(target_context_t *tgt_ctxt)
 {
 	volume_bitmap_t     *vbmap = NULL;
 
+	dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Entry for %s", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid);
 	err("Flushing bitmap file in rawio mode for %s", tgt_ctxt->tc_guid);
+	
 	volume_lock(tgt_ctxt);
 	if(tgt_ctxt->tc_bp->volume_bitmap) {
 		vbmap = tgt_ctxt->tc_bp->volume_bitmap;
 		get_volume_bitmap(vbmap);
+		dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Got bitmap reference (state=%d)", 
+		    current->pid, current->comm, vbmap->eVBitmapState);
+	} else {
+		dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: No volume_bitmap found!", 
+		    current->pid, current->comm);
 	}
 	volume_unlock(tgt_ctxt);
 		
-	if (!vbmap) 
+	if (!vbmap) {
+		err("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: vbmap is NULL, returning", 
+		    current->pid, current->comm);
 		goto out;
+	}
 
-	INM_BUG_ON(vbmap->eVBitmapState == ecVBitmapStateClosed); 
+	if (vbmap->eVBitmapState == ecVBitmapStateClosed) {
+		err("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: ERROR - Bitmap is CLOSED (state=%d)", 
+		    current->pid, current->comm, vbmap->eVBitmapState);
+		INM_BUG_ON(1);
+	} 
 	
+	dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Saving all changes for %s", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid);
 	inmage_flt_save_all_changes(tgt_ctxt, TRUE, INM_NO_OP);
 
-	if (tgt_ctxt->tc_resync_required)
+	if (tgt_ctxt->tc_resync_required) {
+		err("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Volume %s requires resync (err_code=0x%x, err_status=0x%llx)", 
+		    current->pid, current->comm, tgt_ctxt->tc_guid,
+		    tgt_ctxt->tc_out_of_sync_err_code, tgt_ctxt->tc_out_of_sync_err_status);
 		bitmap_api_set_volume_out_of_sync(vbmap->bitmap_api,
 					tgt_ctxt->tc_out_of_sync_err_code,
 					tgt_ctxt->tc_out_of_sync_err_status);
+	}
 
 	volume_lock(tgt_ctxt);
 	tgt_ctxt->tc_flags |= VCF_VOLUME_STACKED_PARTIALLY;
 	volume_unlock(tgt_ctxt);
 
+	dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Closing bitmap for %s", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid);
 	flush_and_close_bitmap_file(tgt_ctxt);
 	
 	volume_lock(tgt_ctxt);
@@ -122,6 +156,8 @@ lcw_flush_volume_changes(target_context_t *tgt_ctxt)
 	put_volume_bitmap(vbmap);
 
 out:
+	dbg("[PID=%d %s] LCW_FLUSH_VOLUME_CHANGES: Completed for %s", 
+	    current->pid, current->comm, tgt_ctxt->tc_guid);
 	return;
 }
 
@@ -132,30 +168,56 @@ lcw_flush_changes(void)
 	target_context_t    *tgt_ctxt = NULL;
 	target_context_t    *root = NULL;
 
+	dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Entry - scanning all volumes", 
+	    current->pid, current->comm);
+
 	INM_DOWN_READ(&driver_ctx->tgt_list_sem);
 	inm_list_for_each_safe(ptr, nextptr, &driver_ctx->tgt_list) {
 		tgt_ctxt = inm_list_entry(ptr, target_context_t, tc_list);
 
+		dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Checking volume %s (flags=0x%x, has_bitmap=%d)", 
+		    current->pid, current->comm, tgt_ctxt->tc_guid, tgt_ctxt->tc_flags,
+		    tgt_ctxt->tc_bp->volume_bitmap ? 1 : 0);
+
 		if (tgt_ctxt->tc_flags & 
-				(VCF_VOLUME_CREATING | VCF_VOLUME_DELETING))
+				(VCF_VOLUME_CREATING | VCF_VOLUME_DELETING)) {
+			dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Skipping %s (CREATING or DELETING)", 
+			    current->pid, current->comm, tgt_ctxt->tc_guid);
 			continue;
+		}
 
 		/* keep the root device for the end */
 		if (isrootdev(tgt_ctxt)) {
+			dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Found root device %s, deferring to end", 
+			    current->pid, current->comm, tgt_ctxt->tc_guid);
 			root = tgt_ctxt;
 			continue;
 		}
 
-		if (tgt_ctxt->tc_bp->volume_bitmap) 
+		if (tgt_ctxt->tc_bp->volume_bitmap) {
+			dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Calling lcw_flush_volume_changes for %s", 
+			    current->pid, current->comm, tgt_ctxt->tc_guid);
 			lcw_flush_volume_changes(tgt_ctxt);
+		} else {
+			dbg("[PID=%d %s] LCW_FLUSH_CHANGES: No bitmap for %s, skipping", 
+			    current->pid, current->comm, tgt_ctxt->tc_guid);
+		}
 	}
 
-	if (root && root->tc_bp->volume_bitmap)
+	if (root && root->tc_bp->volume_bitmap) {
+		dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Processing root device %s", 
+		    current->pid, current->comm, root->tc_guid);
 		lcw_flush_volume_changes(root);
-	else
+	} else {
+		err("[PID=%d %s] LCW_FLUSH_CHANGES: ERROR - No root device found or no bitmap!", 
+		    current->pid, current->comm);
 		INM_BUG_ON(1); /* This should never happen */
+	}
 
 	INM_UP_READ(&driver_ctx->tgt_list_sem);
+
+	dbg("[PID=%d %s] LCW_FLUSH_CHANGES: Completed, returning", 
+	    current->pid, current->comm);
 }
 
 static inm_s32_t
@@ -182,8 +244,9 @@ lcw_map_bitmap_file_blocks(target_context_t *tgt_ctxt)
 	INM_DOWN(&vbmap->sem);
 
 	error = bitmap_api_map_file_blocks(vbmap->bitmap_api, &hdl);
-	if (!error)
+	if (!error) {
 		fstream_raw_close(hdl);
+	}
 
 	INM_UP(&vbmap->sem);
 	put_volume_bitmap(vbmap);

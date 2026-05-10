@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -48,9 +48,14 @@
 #include "verifier.h"
 #include "telemetry-exception.h"
 
+/* Macro for stringifying defines */
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
 /* driver state */
 inm_s32_t inm_mod_state;
 inm_u32_t lcwModeOn;
+bool g_dbg_as_err = FALSE;
 
 #ifdef IDEBUG_MIRROR_IO
 inm_s32_t inject_atio_err = 0;
@@ -98,6 +103,7 @@ static struct kobj_type *part_ktype_ptr = NULL;
 void update_cur_dat_pg(change_node_t *, data_page_t *, int);
 data_page_t *get_cur_data_pg(change_node_t *node, inm_s32_t *offset);
 static void flt_end_io_chain(struct bio *bio, inm_s32_t error);
+void print_all_ioctl_values_with_err(void);
 
 inm_s32_t driver_state = DRV_LOADED_FULLY;
 
@@ -213,7 +219,7 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
 #else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
@@ -364,7 +370,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
@@ -383,7 +389,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 #endif
 	q_info->q = q;
 	
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	if (q->disk->queue_kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
@@ -403,7 +409,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
 #else
 	q_info->orig_kobj_type =  q->kobj.ktype;
@@ -415,12 +421,16 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	memcpy_s(&q_info->mod_mq_ops, sizeof(struct blk_mq_ops),
 			 q_info->orig_mq_ops, sizeof(struct blk_mq_ops));
 	q_info->mod_mq_ops.queue_rq = inm_queue_rq;
+#ifdef INM_QUEUE_RQS_ENABLED
+	if (q_info->orig_mq_ops->queue_rqs)
+		q_info->mod_mq_ops.queue_rqs = inm_queue_rqs;
+#endif
 	(void)xchg(&q->mq_ops, &q_info->mod_mq_ops);
 #else
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
 #else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
@@ -839,11 +849,11 @@ copy_normal_bio_data_to_data_pages(target_context_t *tgt_ctxt,
 #endif
 		dbg("Vec = %p", bvec);
 		seg_offset = bvec->bv_offset;
-		seg_rem = MIN(bvec->bv_len, bytes_to_copy);
+		seg_rem = MIN(bvec->bv_len, bytes_to_copy); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 		src = INM_KMAP_ATOMIC(bvec->bv_page, KM_SOFTIRQ0);
 		while (seg_rem) {
-			to_copy = MIN(seg_rem, pg_rem);
-			to_copy = MIN(to_copy, bytes_res_node);
+			to_copy = MIN(seg_rem, pg_rem); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
+			to_copy = MIN(to_copy, bytes_res_node); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 			dbg("SPage = %p, SOffset = %d, DPage = %p, DOffset = %d copy = %d", 
 				 src, seg_offset, dst, pg_offset, 
 				 to_copy); 
@@ -1393,7 +1403,7 @@ flt_save_bio_info(target_context_t *ctx, dm_bio_info_t **bio_info,
 
 			(*bio_info)->bi_chg_node = chg_node;
 
-			length = min(max_data_sz_per_chg_node, remaining_length);
+			length = min(max_data_sz_per_chg_node, remaining_length); // CodeQL [SM03932] min is using binary operator for comparison which is safe here
 			remaining_length -= length;
 		}
 	}
@@ -1442,32 +1452,6 @@ out_err:
 	goto out;
 }
 
-void
-get_root_disk(struct bio *bio)
-{
-	target_context_t *ctx;
-
-	INM_DOWN_READ(&driver_ctx->tgt_list_sem);
-
-	ctx = get_tgt_ctxt_from_bio(bio);
-	if (ctx) {
-		volume_lock(ctx);
-	
-		if (!(ctx->tc_flags & 
-				(VCF_VOLUME_DELETING | VCF_VOLUME_CREATING)) &&
-				!(ctx->tc_flags & VCF_ROOT_DEV)) {
-			info("Root Disk - %s (%s)", ctx->tc_guid, 
-								ctx->tc_pname);
-			driver_ctx->dc_root_disk = ctx;
-			ctx->tc_flags |= VCF_ROOT_DEV;
-		}
-
-		volume_unlock(ctx);
-	}
-
-	INM_UP_READ(&driver_ctx->tgt_list_sem);
-}
-
 /* chk whether is driver doing this IO */
 int
 is_our_io(struct bio *biop) 
@@ -1475,14 +1459,28 @@ is_our_io(struct bio *biop)
 	struct bio_vec *bvecp = NULL;
 	const inm_address_space_operations_t *a_opsp = NULL;
 	inma_ops_t *t_inma_opsp = NULL;
-	struct address_space *mapping = NULL;
 	unsigned long lock_flag;
+	static inm_u64_t entryCount = 0;
+	bool logErr = false;
 
 	INM_BUG_ON(!biop);
 
+	entryCount++;
+	if (entryCount % 10000 == 0) {
+		logErr = true;
+	}
+
+#if defined(HAVE_BI_ITER_BI_SIZE)
+    // For newer kernels with bi_iter.bi_size
+    size_t bio_size = biop->bi_iter.bi_size;
+#else
+    // For older kernels, keep using existing code with bi_vcnt to avoid any regressions
+    size_t bio_size = biop->bi_vcnt;
+#endif
+
 #if !(defined(RHEL_MAJOR) && (RHEL_MAJOR == 5))
-	if (!biop->bi_vcnt || INM_IS_OFFLOAD_REQUEST_OP(biop)) {
-#if (defined (RHEL8) || defined (RHEL7))
+	if (!bio_size || INM_IS_OFFLOAD_REQUEST_OP(biop)) {
+#if (defined (RHEL8) || defined (RHEL7) || defined (RHEL9))
 		if (unlikely(lcwModeOn &&
 				strcmp(current->comm, "inmshutnotify") == 0)) {
 			fstream_raw_map_bio(biop);
@@ -1491,35 +1489,62 @@ is_our_io(struct bio *biop)
 			return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;
 		}
 #endif
+		if (logErr) {
+			dbg("Invalid bio: %p, vcnt = %d, bi_size = %d", biop, biop->bi_vcnt, bio_size);
+		}
+
 		return FALSE;
 	}
 #endif
 
+	
 	bvecp = bio_iovec_idx(biop, INM_BUF_ITER(biop));
 	if(!bvecp || !bvecp->bv_page)
+	{
+		if (logErr) {
+			dbg("Invalid bio bvecp or bv_page: %p, bvecp = %p, bv_page = %p", 
+					biop, bvecp, (bvecp ? bvecp->bv_page : NULL));
+		}		
 		return FALSE;
-
+	}
 	if (!virt_addr_valid(bvecp) || 
 		!INM_VIRT_ADDR_VALID(INM_PAGE_TO_VIRT(bvecp->bv_page)))
+	{
+		if (logErr) {
+			dbg("Invalid bio virt_addr_valid(bvecp): %p, bvecp = %p, bv_page = %p", 
+					biop, bvecp, bvecp->bv_page);
+		}
 		return FALSE;
+	}
 
 	if (!bvecp->bv_page->mapping)
+	{
+		if (logErr) {
+			dbg("Invalid bio bvecp->bv_page->mapping: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
+	}
 
 	if (!virt_addr_valid(bvecp->bv_page->mapping))
+	{
+		if (logErr) {
+			dbg("Invalid bio virt_addr_valid: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
-
+	}
 	if (PageAnon(bvecp->bv_page))
+	{	
+		if (logErr) {	
+			dbg("Invalid bio PageAnon: %p, bvecp = %p, bv_page = %p, mapping = %p", 
+					biop, bvecp, bvecp->bv_page, 
+					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+		}
 		return FALSE;
-
-	mapping = bvecp->bv_page->mapping;
-
-	if (unlikely(!driver_ctx->dc_root_disk) &&
-		virt_addr_valid(mapping->host) &&
-		virt_addr_valid(mapping->host->i_sb) &&
-		mapping->host->i_sb->s_dev == driver_ctx->root_dev &&
-		driver_state & DRV_LOADED_FULLY)
-		get_root_disk(biop); 
+	}
 
 #ifdef INM_RECUSIVE_ADSPC 
 	a_opsp = bvecp->bv_page->mapping;
@@ -1541,8 +1566,14 @@ is_our_io(struct bio *biop)
 #endif
 		dbg("Recursive write: Lookup = %p, Mapping = %p", 
 				  			t_inma_opsp, a_opsp);
-		if (driver_ctx->dc_lcw_aops == t_inma_opsp)
-				fstream_raw_map_bio(biop);
+		if (driver_ctx->dc_lcw_aops == t_inma_opsp) {
+			dbg("[PID=%d %s] LCW: Calling fstream_raw_map_bio (sector=%llu, size=%u)", 
+			    current->pid, current->comm, (unsigned long long)INM_BUF_SECTOR(biop), INM_BUF_COUNT(biop));
+			fstream_raw_map_bio(biop);
+		} else {
+			dbg("LCW: Skipping map - dc_lcw_aops=%p != t_inma_opsp=%p", 
+			    driver_ctx->dc_lcw_aops, t_inma_opsp);
+		}
 		
 		/* If TrackRecursiveWrites is set, return FALSE */
 		return driver_ctx->tunable_params.enable_recio ? FALSE : TRUE;    
@@ -1871,44 +1902,21 @@ void destroy_alloc_thread(void)
 	INM_KTHREAD_STOP(driver_ctx->dc_alloc_thread_task);
 }
 
-blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx, 
-					const struct blk_mq_queue_data *bd)
+/* Helper function to process bios in a request for filtering */
+static inline void inm_process_request_bios(struct request *rq, 
+					target_context_t *ctx, 
+					req_queue_info_t *q_info,
+					inm_atomic_t *bio_counter)
 {
-	req_queue_info_t *q_info =  NULL;
-	struct request *rq = bd->rq;
-	struct request_queue *q = rq->q;
-	unsigned long lock_flag = 0;
-	queue_rq_fn *orig_queue_rq_fn = NULL;
 	struct bio *bio;
-	target_context_t *ctx;
 	dm_bio_info_t *bio_info;
 	inm_u32_t idx;
 	sector_t end_sector;
 	host_dev_ctx_t *hdcp;
 	int is_resized = 0;
 
-	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
-			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6)  || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
-	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
-#else
-	q_info = get_qinfo_from_kobj(&q->kobj);
-#endif
-	if(q_info){
-		orig_queue_rq_fn = q_info->orig_mq_ops->queue_rq;
-		ctx = q_info->tc;
-		get_tgt_ctxt(ctx);
-	}else{
-		orig_queue_rq_fn = q->mq_ops->queue_rq;
-		INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock, 
-				  				lock_flag);
-		goto out_orig_queue_rq_fn;
-	}
-	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock, 
-			 					lock_flag);
-
 	if (!rq->bio)
-		goto out;
+		return;
 
 	bio = rq->bio;
 
@@ -1931,12 +1939,12 @@ process_bio:
 		goto next_bio;
 
 	if (ctx->tc_flags & (VCF_VOLUME_CREATING | VCF_VOLUME_DELETING)) {
-		goto out;
+		return;
 	}
 
 	if(is_target_filtering_disabled(ctx)) {
 		dbg("mirror paused for scsi_id %s",ctx->tc_pname);
-		goto out;
+		return;
 	}
 
 	if (bio->bi_end_io == flt_end_io_fn)
@@ -1987,7 +1995,7 @@ process_bio:
 	volume_unlock(ctx);
 
 	if (is_resized)
-		goto out;
+		return;
 
 get_reference:
 	get_tgt_ctxt(ctx);
@@ -2004,6 +2012,10 @@ get_reference:
 		put_tgt_ctxt(ctx);
 		goto next_bio;
 	}
+
+	/* Increment counter for processed write bio */
+	if (bio_counter)
+		INM_ATOMIC_INC(bio_counter);
 
 	idx = inm_comp_io_bkt_idx(INM_BUF_COUNT(bio));
 	INM_ATOMIC_INC(&ctx->tc_stats.io_pat_writes[idx]);
@@ -2031,17 +2043,105 @@ get_reference:
 
 next_bio:
 	if (bio == rq->biotail)
-		goto out;
+		return;
 
 	bio = bio->bi_next;
 	goto process_bio;
+}
 
-out:
+blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx, 
+					const struct blk_mq_queue_data *bd)
+{
+	req_queue_info_t *q_info =  NULL;
+	struct request *rq = bd->rq;
+	struct request_queue *q = rq->q;
+	unsigned long lock_flag = 0;
+	queue_rq_fn *orig_queue_rq_fn = NULL;
+	target_context_t *ctx;
+
+	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
+			 					lock_flag);
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7)  || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
+#else
+	q_info = get_qinfo_from_kobj(&q->kobj);
+#endif
+	if(q_info){
+		orig_queue_rq_fn = q_info->orig_mq_ops->queue_rq;
+		ctx = q_info->tc;
+		get_tgt_ctxt(ctx);
+	}else{
+		orig_queue_rq_fn = q->mq_ops->queue_rq;
+		INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock, 
+				  				lock_flag);
+		goto out_orig_queue_rq_fn;
+	}
+	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock, 
+			 					lock_flag);
+
+	/* Process all bios in this request, counting each processed write bio */
+	inm_process_request_bios(rq, ctx, q_info, &ctx->tc_nr_queue_rq_bios);
+
 	put_tgt_ctxt(ctx);
 
 out_orig_queue_rq_fn:
 	return orig_queue_rq_fn(hctx, bd);
 }
+
+#ifdef INM_QUEUE_RQS_ENABLED
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0) || defined(RHEL9_7) || (defined(RHEL10) && UPDATE != 0) || (defined(debian) && LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+void inm_queue_rqs(struct rq_list *rqlist)
+#else
+void inm_queue_rqs(struct request **rqlist)
+#endif
+{
+	req_queue_info_t *q_info = NULL;
+	struct request *rq, *next;
+	struct request_queue *q;
+	unsigned long lock_flag = 0;
+	queue_rqs_fn *orig_queue_rqs_fn = NULL;
+	target_context_t *ctx;
+
+	rq = rq_list_peek(rqlist);
+	if (!rq || !rq->q)
+		return;
+	q = rq->q;
+	/* Acquire lock once and look up context once for the entire batch */
+	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
+							lock_flag);
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
+#else
+	q_info = get_qinfo_from_kobj(&q->kobj);
+#endif
+	if (q_info) {
+		orig_queue_rqs_fn = q_info->orig_mq_ops->queue_rqs;
+		ctx = q_info->tc;
+		get_tgt_ctxt(ctx);
+	} else {
+		orig_queue_rqs_fn = q->mq_ops->queue_rqs;
+		INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock,
+									lock_flag);
+		goto out_orig_queue_rqs_fn;
+	}
+	INM_SPIN_UNLOCK_IRQRESTORE(&driver_ctx->dc_host_info.rq_list_lock,
+								lock_flag);
+
+	/* Process all requests in the batch, counting each processed write bio */
+	rq_list_for_each_safe(rqlist, rq, next) {
+		inm_process_request_bios(rq, ctx, q_info,
+					&ctx->tc_nr_queue_rqs_bios);
+	}
+	
+	put_tgt_ctxt(ctx);
+
+out_orig_queue_rqs_fn:
+	/* Call the original queue_rqs with the entire batch */
+	if (orig_queue_rqs_fn)
+		orig_queue_rqs_fn(rqlist);
+}
+#endif
+
 #else
 int create_alloc_thread(void)
 {
@@ -2272,8 +2372,10 @@ flt_disk_removal(struct kobject *kobj)
 						DEVICE_STATUS_REMOVED);
 	volume_unlock(ctx);
 	
-	if (driver_ctx->dc_root_disk == ctx)
+	if (driver_ctx->dc_root_disk == ctx) {
 		driver_ctx->dc_root_disk = NULL;
+		err("dc_root_disk set to NULL\n");
+	}
 
 	up_read(&(driver_ctx->tgt_list_sem));
 
@@ -2329,7 +2431,7 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	qkobj = &disk->queue_kobj;
 #else
 	qkobj = &disk->queue->kobj;
@@ -2527,17 +2629,17 @@ unregister_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 void
 register_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 {
-	struct gendisk *disk = hdc_dev->hdc_disk_ptr;
-	struct block_device_operations *flt_fops = NULL;
 	host_dev_ctx_t      *hdcp = NULL;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,13,0)
+	struct gendisk *disk = hdc_dev->hdc_disk_ptr;
+	struct block_device_operations *flt_fops = NULL;
+
 	if (disk->fops->revalidate_disk == flt_revalidate_disk) {
 		INM_BUG_ON(disk->fops->revalidate_disk == 
 				  			flt_revalidate_disk);
 		return;
 	}
-#endif
   
 	/*
 	 * If the allocation fails, we fall back to beyond range 
@@ -2556,9 +2658,7 @@ register_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 		return;
 	}
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,13,0)
 	flt_fops->revalidate_disk = flt_revalidate_disk;
-#endif
 
 	dbg("Registering for disk change notification");
 
@@ -2566,6 +2666,16 @@ register_disk_change_notification(target_context_t *ctx, host_dev_t *hdc_dev)
 	hdc_dev->hdc_fops = disk->fops;
 	disk->fops = flt_fops;
 	volume_unlock(ctx);
+#endif
+	/*
+	 * On kernels >= 5.13, revalidate_disk was removed so there is
+	 * nothing to hook. Replacing disk->fops with a copy breaks
+	 * drivers that use fops pointer identity for type dispatch
+	 * (e.g. NVMe's dev_to_ns_head checks disk->fops == &nvme_bdev_ops).
+	 * A mismatched fops pointer causes wwid_show to misinterpret
+	 * struct types, reading past object bounds into random memory
+	 * and triggering a kernel panic.
+	 */
 
 	/* Check if the expected and actual sizes match */
 	hdcp = ctx->tc_priv;
@@ -2823,7 +2933,7 @@ inm_s32_t get_root_info(void)
 	driver_ctx->root_dev = f->f_dentry->d_sb->s_dev;
 #endif
 	filp_close(f, current->files);
-	dbg("Root dev_t = %u,%u", MAJOR(driver_ctx->root_dev), 
+	err("Root dev_t = %u,%u", MAJOR(driver_ctx->root_dev), 
 			MINOR(driver_ctx->root_dev));
 	return 0;
 }
@@ -3020,6 +3130,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 		err("Driver is being unloaded now");
 		return INM_EINVAL;
 	}
+
 
 	switch(cmd) {
 	case IOCTL_INMAGE_VOLUME_STACKING:
@@ -3229,7 +3340,7 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 							error);
 		break;
 
-	case IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST:
+	case IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST:		
 		error = process_get_protected_volume_list_ioctl(filp, 
 							(void __user*)arg);
 		dbg("IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST ioctl err = %d\n", 
@@ -3373,6 +3484,16 @@ inm_s32_t flt_ioctl(struct file *filp, inm_u32_t cmd, unsigned long arg)
 	case IOCTL_INMAGE_SET_DRAIN_STATE:
 		error = process_set_drain_state_ioctl(filp, (void __user*)arg);
 		dbg("IOCTL_INMAGE_SET_DRAIN_STATE err = %d\n", error);
+		break;
+
+	case IOCTL_INMAGE_DUMP_DRIVER_STRUCTS:
+        error = process_dump_driver_structs_ioctl(filp, (void __user*)arg);
+		dbg("IOCTL_INMAGE_DUMP_DRIVER_STRUCTS err = %d\n", error);
+		break;
+
+	case IOCTL_INMAGE_DBG_AS_ERR:
+    	error = process_dbg_as_err_ioctl(filp, (void __user*)arg);
+		dbg("IOCTL_INMAGE_DBG_AS_ERR err = %d\n", error);
 		break;
 
 	default:
@@ -3541,9 +3662,18 @@ inm_s32_t __init involflt_init(void)
 	inm_s32_t r;
 	unsigned long lock_flag = 0;
 
-	info("Version - %u.%u.%u.%u", INMAGE_PRODUCT_VERSION_MAJOR, 
+	info("Driver Version - %u.%u.%u.%u", DRIVER_MAJOR_VERSION, 
+		DRIVER_MINOR_VERSION, DRIVER_MINOR_VERSION2,
+		DRIVER_MINOR_VERSION3);
+	info("Product Version - %u.%u.%u.%u", INMAGE_PRODUCT_VERSION_MAJOR, 
 		INMAGE_PRODUCT_VERSION_MINOR, INMAGE_PRODUCT_VERSION_PRIVATE,
 		INMAGE_PRODUCT_VERSION_BUILDNUM);
+
+#if 0
+	/* Print all the ioctl values with error codes */
+	/* This is useful for debugging purposes */
+	print_all_ioctl_values_with_err();
+#endif
 
 #ifdef INITRD_MODE 
 	if (!strcmp(in_initrd, "yes") || !strcmp(in_initrd, "YES"))
@@ -3814,10 +3944,84 @@ inm_cleanup_mirror_bufinfo(host_dev_ctx_t *hdcp)
 	return;
 }
 
+void print_all_ioctl_values_with_err(void) 
+{
+    err("IOCTL_INMAGE_VOLUME_STACKING:           0x%lx", (unsigned long)IOCTL_INMAGE_VOLUME_STACKING);
+    err("IOCTL_INMAGE_PROCESS_START_NOTIFY:      0x%lx", (unsigned long)IOCTL_INMAGE_PROCESS_START_NOTIFY);
+    err("IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY:   0x%lx", (unsigned long)IOCTL_INMAGE_SERVICE_SHUTDOWN_NOTIFY);
+    err("IOCTL_INMAGE_STOP_FILTERING_DEVICE:     0x%lx", (unsigned long)IOCTL_INMAGE_STOP_FILTERING_DEVICE);
+    err("IOCTL_INMAGE_REMOVE_FILTER_DEVICE:      0x%lx", (unsigned long)IOCTL_INMAGE_REMOVE_FILTER_DEVICE);
+    err("IOCTL_INMAGE_START_FILTERING_DEVICE:    0x%lx", (unsigned long)IOCTL_INMAGE_START_FILTERING_DEVICE);
+    err("IOCTL_INMAGE_START_FILTERING_DEVICE_V2: 0x%lx", (unsigned long)IOCTL_INMAGE_START_FILTERING_DEVICE_V2);
+    err("IOCTL_INMAGE_FREEZE_VOLUME:             0x%lx", (unsigned long)IOCTL_INMAGE_FREEZE_VOLUME);
+    err("IOCTL_INMAGE_THAW_VOLUME:               0x%lx", (unsigned long)IOCTL_INMAGE_THAW_VOLUME);
+    err("IOCTL_INMAGE_TAG_VOLUME_V2:             0x%lx", (unsigned long)IOCTL_INMAGE_TAG_VOLUME_V2);
+    err("IOCTL_INMAGE_IOBARRIER_TAG_VOLUME:      0x%lx", (unsigned long)IOCTL_INMAGE_IOBARRIER_TAG_VOLUME);
+    err("IOCTL_INMAGE_CREATE_BARRIER_ALL:        0x%lx", (unsigned long)IOCTL_INMAGE_CREATE_BARRIER_ALL);
+    err("IOCTL_INMAGE_REMOVE_BARRIER_ALL:        0x%lx", (unsigned long)IOCTL_INMAGE_REMOVE_BARRIER_ALL);
+    err("IOCTL_INMAGE_TAG_COMMIT_V2:             0x%lx", (unsigned long)IOCTL_INMAGE_TAG_COMMIT_V2);
+    err("IOCTL_INMAGE_START_MIRRORING_DEVICE:    0x%lx", (unsigned long)IOCTL_INMAGE_START_MIRRORING_DEVICE);
+    err("IOCTL_INMAGE_STOP_MIRRORING_DEVICE:     0x%lx", (unsigned long)IOCTL_INMAGE_STOP_MIRRORING_DEVICE);
+    err("IOCTL_INMAGE_MIRROR_VOLUME_STACKING:    0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_VOLUME_STACKING);
+    err("IOCTL_INMAGE_MIRROR_EXCEPTION_NOTIFY:   0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_EXCEPTION_NOTIFY);
+    err("IOCTL_INMAGE_MIRROR_TEST_HEARTBEAT:     0x%lx", (unsigned long)IOCTL_INMAGE_MIRROR_TEST_HEARTBEAT);
+    err("IOCTL_INMAGE_BLOCK_AT_LUN:              0x%lx", (unsigned long)IOCTL_INMAGE_BLOCK_AT_LUN);
+    err("IOCTL_INMAGE_GET_DIRTY_BLOCKS_TRANS_V2: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_DIRTY_BLOCKS_TRANS_V2);
+    err("IOCTL_INMAGE_COMMIT_DIRTY_BLOCKS_TRANS: 0x%lx", (unsigned long)IOCTL_INMAGE_COMMIT_DIRTY_BLOCKS_TRANS);
+    err("IOCTL_INMAGE_SET_VOLUME_FLAGS:          0x%lx", (unsigned long)IOCTL_INMAGE_SET_VOLUME_FLAGS);
+    err("IOCTL_INMAGE_GET_VOLUME_FLAGS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_FLAGS);
+    err("IOCTL_INMAGE_WAIT_FOR_DB:               0x%lx", (unsigned long)IOCTL_INMAGE_WAIT_FOR_DB);
+    err("IOCTL_INMAGE_CLEAR_DIFFERENTIALS:       0x%lx", (unsigned long)IOCTL_INMAGE_CLEAR_DIFFERENTIALS);
+    err("IOCTL_INMAGE_GET_NANOSECOND_TIME:       0x%lx", (unsigned long)IOCTL_INMAGE_GET_NANOSECOND_TIME);
+    err("IOCTL_INMAGE_UNSTACK_ALL:               0x%lx", (unsigned long)IOCTL_INMAGE_UNSTACK_ALL);
+    err("IOCTL_INMAGE_SYS_PRE_SHUTDOWN:          0x%lx", (unsigned long)IOCTL_INMAGE_SYS_PRE_SHUTDOWN);
+    err("IOCTL_INMAGE_SYS_SHUTDOWN:              0x%lx", (unsigned long)IOCTL_INMAGE_SYS_SHUTDOWN);
+    err("IOCTL_INMAGE_TAG_VOLUME:                0x%lx", (unsigned long)IOCTL_INMAGE_TAG_VOLUME);
+    err("IOCTL_INMAGE_SYNC_TAG_VOLUME:           0x%lx", (unsigned long)IOCTL_INMAGE_SYNC_TAG_VOLUME);
+    err("IOCTL_INMAGE_GET_TAG_VOLUME_STATUS:     0x%lx", (unsigned long)IOCTL_INMAGE_GET_TAG_VOLUME_STATUS);
+    err("IOCTL_INMAGE_WAKEUP_ALL_THREADS:        0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_ALL_THREADS);
+    err("IOCTL_INMAGE_GET_DB_NOTIFY_THRESHOLD:   0x%lx", (unsigned long)IOCTL_INMAGE_GET_DB_NOTIFY_THRESHOLD);
+    err("IOCTL_INMAGE_RESYNC_START_NOTIFICATION: 0x%lx", (unsigned long)IOCTL_INMAGE_RESYNC_START_NOTIFICATION);
+    err("IOCTL_INMAGE_RESYNC_END_NOTIFICATION:   0x%lx", (unsigned long)IOCTL_INMAGE_RESYNC_END_NOTIFICATION);
+    err("IOCTL_INMAGE_GET_DRIVER_VERSION:        0x%lx", (unsigned long)IOCTL_INMAGE_GET_DRIVER_VERSION);
+    err("IOCTL_INMAGE_SHELL_LOG:                 0x%lx", (unsigned long)IOCTL_INMAGE_SHELL_LOG);
+    err("IOCTL_INMAGE_AT_LUN_CREATE:             0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_CREATE);
+    err("IOCTL_INMAGE_AT_LUN_DELETE:             0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_DELETE);
+    err("IOCTL_INMAGE_AT_LUN_LAST_WRITE_VI:      0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_LAST_WRITE_VI);
+    err("IOCTL_INMAGE_AT_LUN_LAST_HOST_IO_TIMESTAMP: 0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_LAST_HOST_IO_TIMESTAMP);
+    err("IOCTL_INMAGE_AT_LUN_QUERY:              0x%lx", (unsigned long)IOCTL_INMAGE_AT_LUN_QUERY);
+    err("IOCTL_INMAGE_GET_GLOBAL_STATS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_GLOBAL_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_STATS:          0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_STATS);
+    err("IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_PROTECTED_VOLUME_LIST);
+    err("IOCTL_INMAGE_GET_SET_ATTR:              0x%lx", (unsigned long)IOCTL_INMAGE_GET_SET_ATTR);
+    err("IOCTL_INMAGE_GET_ADDITIONAL_VOLUME_STATS: 0x%lx", (unsigned long)IOCTL_INMAGE_GET_ADDITIONAL_VOLUME_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_LATENCY_STATS:  0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_LATENCY_STATS);
+    err("IOCTL_INMAGE_GET_VOLUME_BMAP_STATS:     0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_BMAP_STATS);
+    err("IOCTL_INMAGE_SET_INVOLFLT_VERBOSITY:    0x%lx", (unsigned long)IOCTL_INMAGE_SET_INVOLFLT_VERBOSITY);
+    err("IOCTL_INMAGE_GET_MONITORING_STATS:      0x%lx", (unsigned long)IOCTL_INMAGE_GET_MONITORING_STATS);
+    err("IOCTL_INMAGE_GET_BLK_MQ_STATUS:         0x%lx", (unsigned long)IOCTL_INMAGE_GET_BLK_MQ_STATUS);
+    err("IOCTL_INMAGE_GET_VOLUME_STATS_V2:       0x%lx", (unsigned long)IOCTL_INMAGE_GET_VOLUME_STATS_V2);
+    err("IOCTL_INMAGE_REPLICATION_STATE:         0x%lx", (unsigned long)IOCTL_INMAGE_REPLICATION_STATE);
+    err("IOCTL_INMAGE_NAME_MAPPING:              0x%lx", (unsigned long)IOCTL_INMAGE_NAME_MAPPING);
+    err("IOCTL_INMAGE_LCW:                       0x%lx", (unsigned long)IOCTL_INMAGE_LCW);
+    err("IOCTL_INMAGE_WAIT_FOR_DB_V2:            0x%lx", (unsigned long)IOCTL_INMAGE_WAIT_FOR_DB_V2);
+    err("IOCTL_INMAGE_INIT_DRIVER_FULLY:         0x%lx", (unsigned long)IOCTL_INMAGE_INIT_DRIVER_FULLY);
+    err("IOCTL_INMAGE_COMMITDB_FAIL_TRANS:       0x%lx", (unsigned long)IOCTL_INMAGE_COMMITDB_FAIL_TRANS);
+    err("IOCTL_INMAGE_GET_CXSTATS_NOTIFY:        0x%lx", (unsigned long)IOCTL_INMAGE_GET_CXSTATS_NOTIFY);
+    err("IOCTL_INMAGE_WAKEUP_GET_CXSTATS_NOTIFY_THREAD: 0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_GET_CXSTATS_NOTIFY_THREAD);
+    err("IOCTL_INMAGE_TAG_DRAIN_NOTIFY:          0x%lx", (unsigned long)IOCTL_INMAGE_TAG_DRAIN_NOTIFY);
+    err("IOCTL_INMAGE_WAKEUP_TAG_DRAIN_NOTIFY_THREAD: 0x%lx", (unsigned long)IOCTL_INMAGE_WAKEUP_TAG_DRAIN_NOTIFY_THREAD);
+    err("IOCTL_INMAGE_MODIFY_PERSISTENT_DEVICE_NAME: 0x%lx", (unsigned long)IOCTL_INMAGE_MODIFY_PERSISTENT_DEVICE_NAME);
+    err("IOCTL_INMAGE_GET_DRAIN_STATE:           0x%lx", (unsigned long)IOCTL_INMAGE_GET_DRAIN_STATE);
+    err("IOCTL_INMAGE_SET_DRAIN_STATE:           0x%lx", (unsigned long)IOCTL_INMAGE_SET_DRAIN_STATE);
+    err("IOCTL_INMAGE_DUMP_DRIVER_STRUCTS:       0x%lx", (unsigned long)IOCTL_INMAGE_DUMP_DRIVER_STRUCTS);
+    err("IOCTL_INMAGE_DBG_AS_ERR:                0x%lx", (unsigned long)IOCTL_INMAGE_DBG_AS_ERR);
+}
+
 module_init(involflt_init);
 module_exit(involflt_exit);
 
 MODULE_AUTHOR("Microsoft Corporation");
 MODULE_DESCRIPTION("Microsoft Filter Driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION(BLD_DATE " [ " BLD_TIME " ]");
+MODULE_VERSION("Driver:" TOSTRING(DRIVER_MAJOR_VERSION) "." TOSTRING(DRIVER_MINOR_VERSION) "." TOSTRING(DRIVER_MINOR_VERSION2) "." TOSTRING(DRIVER_MINOR_VERSION3) " Product:" TOSTRING(INMAGE_PRODUCT_VERSION_MAJOR) "." TOSTRING(INMAGE_PRODUCT_VERSION_MINOR) "." TOSTRING(INMAGE_PRODUCT_VERSION_PRIVATE) "." TOSTRING(INMAGE_PRODUCT_VERSION_BUILDNUM) " " BLD_DATE " [ " BLD_TIME " ]");
