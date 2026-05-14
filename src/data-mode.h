@@ -31,9 +31,6 @@ struct _write_metadata_tag;
 struct _change_node;
 struct _data_page;
 
-#define MIN_DATA_SZ_PER_CHANGE_NODE          (1*1024*1024) 	/* 1MB */
-#define DEFAULT_MAX_DATA_SZ_PER_CHANGE_NODE  (4*1024*1024)	/* 4MB */
-#define MAX_DATA_SZ_PER_CHANGE_NODE          (64*1024*1024)	/* 64MB */
 #define SECTOR_SIZE_MASK	0xFFFFFE00
 
 /* struct for writedata information*/

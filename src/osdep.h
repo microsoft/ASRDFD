@@ -83,7 +83,14 @@
 #include <linux/sched/signal.h>
 #endif
 
-#if defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+// restrict the use of bi_size to newer kernels for RHEL 8 onwards only for now to reduce regression risk
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,18,0) && defined (RHEL8))
+#define HAVE_BI_ITER_BI_SIZE
+#else
+#define HAVE_BI_SIZE
+#endif
+
+#if defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 #ifndef INM_FILP_FOR_BDEV_ENABLED
 #define INM_FILP_FOR_BDEV_ENABLED
 #endif
@@ -93,11 +100,21 @@
 #endif
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+#define del_timer_sync(timer) timer_delete_sync((timer))
+#endif
+
 #if defined(SLES15SP3) || LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0) || defined(RHEL8) || \
 	(defined(UBUNTU1804) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)) || defined(UBUNTU2004) || \
 	defined(OL7UEK6)
 #ifndef INM_QUEUE_RQ_ENABLED
 #define INM_QUEUE_RQ_ENABLED
+#endif
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0) || (defined(RHEL9) && !defined(RHEL9_0_1) && !defined(OL9UEK7)) || defined(SLES15SP5)
+#ifndef INM_QUEUE_RQS_ENABLED
+#define INM_QUEUE_RQS_ENABLED
 #endif
 #endif
 
@@ -257,7 +274,7 @@ void unfreeze_volumes(int, tag_volinfo_t *);
 void lock_volumes(int, tag_volinfo_t *);
 void unlock_volumes(int, tag_volinfo_t *);
 inm_s32_t is_rootfs_ro(void);
-
+void log_console(const char *fmt, ...);
 inm_s32_t map_change_node_to_user(struct _change_node *, struct file *);
 
 #if defined(INM_HANDLE_FOR_BDEV_ENABLED)
@@ -276,7 +293,7 @@ struct block_device *inm_open_by_devnum(dev_t, unsigned);
 #define close_bdev_handle(handle)    bdev_release(handle);
 #elif defined(INM_FILP_FOR_BDEV_ENABLED)
 #define close_file(filp)    fput(filp);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_4) || defined(SLES15SP6) || defined(SLES15SP7)
 #define close_bdev(bdev, mode)   blkdev_put(bdev, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30) 
 #define close_bdev(bdev, mode)  blkdev_put(bdev, mode);
@@ -339,6 +356,8 @@ inm_s32_t inm_get_scsi_id(char *path);
 #define IOCTL_INMAGE_AT_LUN_QUERY           _IOWR(FLT_IOCTL, AT_LUN_QUERY_CMD, LUN_QUERY_DATA)
 #define IOCTL_INMAGE_VOLUME_UNSTACKING         _IOW(FLT_IOCTL, VOLUME_UNSTACKING_CMD, VOLUME_GUID)
 #define IOCTL_INMAGE_BOOTTIME_STACKING          _IO(FLT_IOCTL, BOOTTIME_STACKING_CMD)
+#define IOCTL_INMAGE_DUMP_DRIVER_STRUCTS                _IOWR(FLT_IOCTL, DUMP_DRIVER_STRUCTS, inm_u32_t)
+#define IOCTL_INMAGE_DBG_AS_ERR                  	_IOWR(FLT_IOCTL, DBG_AS_ERR, inm_u32_t)
 
 /* target context specific sections */
 struct _target_context *get_tgt_ctxt_from_bio(struct bio *);
@@ -402,15 +421,17 @@ typedef struct inma_ops inma_ops_t;
 /* Debug APIs
  */
 
-#define dbg(format, arg...) \
-	if(IS_DBG_ENABLED(inm_verbosity, INM_DEBUG_ONLY)){				\
-		printk(KERN_DEBUG "%s[%s:%d (DBG)]: " format "\n" , DRIVER_NAME , 	\
-			__FUNCTION__, __LINE__, ## arg);				\
-	}
-
 #define err(format, arg...) 								\
 	printk(KERN_ERR "%s[%s:%d (ERR)]: " format "\n" , DRIVER_NAME, __FUNCTION__ ,	\
 		__LINE__, ## arg)
+
+#define dbg(format, arg...) \
+	if (g_dbg_as_err) \
+            err(format, ## arg); \
+    else if(IS_DBG_ENABLED(inm_verbosity, INM_DEBUG_ONLY)){				\
+		printk(KERN_DEBUG "%s[%s:%d (DBG)]: " format "\n" , DRIVER_NAME , 	\
+			__FUNCTION__, __LINE__, ## arg);				\
+	}
 
 #define vol_err(tcxt, format, arg...)                                       		\
 	printk(KERN_ERR "%s[%s:%d (ERR)]: (%s:%s)" format "\n" , DRIVER_NAME,   	\
@@ -525,7 +546,7 @@ typedef struct completion		inm_completion_t;
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 #define INM_COMPLETE_AND_EXIT(event, val)				\
 		kthread_complete_and_exit(event, val)
 #else
@@ -941,7 +962,7 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #endif
 #endif
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 typedef struct {
     /* empty dummy */
 } mm_segment_t;
@@ -956,7 +977,7 @@ typedef struct {
 })
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) || defined(RHEL9_6)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) || defined(RHEL9_6) || defined(RHEL9_7)
 #define inm_freeze_bdev(__bdev, __sb)   bdev_freeze(__bdev)
 #define inm_thaw_bdev(__bdev, __sb)     bdev_thaw(__bdev)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)

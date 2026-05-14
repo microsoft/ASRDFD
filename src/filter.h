@@ -75,6 +75,7 @@ typedef struct inm_dev_extinfo {
 
 void do_unstack_all(void);
 inm_s32_t isrootdev(struct _target_context *vcptr);
+void try_set_root_disk(struct _target_context *ctx);
 inm_s32_t do_volume_stacking(inm_dev_extinfo_t *);
 inm_s32_t do_start_filtering(inm_devhandle_t *, inm_dev_extinfo_t *);
 inm_s32_t do_start_mirroring(inm_devhandle_t *, mirror_conf_info_t *);

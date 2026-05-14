@@ -272,10 +272,13 @@ inm_s32_t bitmap_api_commit_header(bitmap_api_t *bapi,
 void bitmap_api_calculate_hdr_integrity_checksums(bitmap_header_t *bhdr);
 
 inm_s32_t bitmap_api_read_and_verify_bitmap_header(bitmap_api_t *bapi,
-					     inm_s32_t *inmage_status);
+					     inm_s32_t *inmage_status,
+					     bool verify_blocks);
+
+inm_s32_t bitmap_api_fuzzy_sector_search(bitmap_api_t *bapi, inm_s64_t *found_sector);
 
 inm_s32_t bitmap_api_verify_header(bitmap_api_t *bapi,
-				bitmap_header_t *bheader);
+				bitmap_header_t *bheader, inm_s32_t silent);
 
 inm_s32_t is_volume_in_sync(bitmap_api_t *bapi, inm_s32_t *vol_in_sync,
 		      inm_s32_t *out_of_sync_err_code);

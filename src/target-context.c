@@ -325,6 +325,13 @@ tgt_ctx_common_init(target_context_t *ctx, inm_dev_extinfo_t *dev_info)
 	INM_INIT_WAITQUEUE_HEAD(&ctx->tc_wq_in_flight_ios);
 	INM_ATOMIC_SET(&(ctx->tc_nr_in_flight_ios), 0);
 
+#ifdef INM_QUEUE_RQ_ENABLED
+	INM_ATOMIC_SET(&(ctx->tc_nr_queue_rq_bios), 0);
+#ifdef INM_QUEUE_RQS_ENABLED
+	INM_ATOMIC_SET(&(ctx->tc_nr_queue_rqs_bios), 0);
+#endif
+#endif
+
 	INM_ATOMIC_SET(&(ctx->tc_nr_chain_bios_submitted), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_chain_bios_pending), 0);
 	INM_ATOMIC_SET(&(ctx->tc_nr_completed_in_child_stack), 0);
@@ -1385,7 +1392,7 @@ thaw_volume(target_context_t *ctxt, struct inm_list_head *head)
 		close_file(vinfo->filp);
 #else
 		close_bdev(vinfo->bdev, FMODE_READ | FMODE_WRITE);
-#endif	
+#endif
 		INM_KFREE(vinfo, sizeof(vol_info_t), INM_KERNEL_HEAP);
 	}
 }

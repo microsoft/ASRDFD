@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+﻿/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -120,6 +120,7 @@ void iobuffer_put(iobuffer_t *iob)
 inm_s32_t iobuffer_sync_read(iobuffer_t *iob)
 {
 	inm_s32_t ret = 0;
+	bitmap_header_t *hdr = NULL;
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
@@ -131,8 +132,21 @@ inm_s32_t iobuffer_sync_read(iobuffer_t *iob)
 	if (INM_ATOMIC_READ(&iob->locked) > 1)
 		return -EBUSY;
 
+	/* Only log header reads (offset=0, size=16384) to avoid flooding */
+	if (iob->starting_offset == 0 && iob->size == LOG_HEADER_SIZE) {
+		dbg("[PID=%d %s] iobuffer_sync_read: About to read header offset=%llu, size=%u", 
+		    current->pid, current->comm, iob->starting_offset, iob->size);
+	}
+	
 	ret = fstream_read(iob->bapi->fs, iob->buffer, iob->size, 
 						iob->starting_offset);
+	
+	if (ret == 0 && iob->starting_offset == 0 && iob->size == LOG_HEADER_SIZE) {
+		hdr = (bitmap_header_t *)iob->buffer;
+		dbg("[PID=%d %s] iobuffer_sync_read: Header read complete (ret=%d), endian=%d, version=0x%x, hdr_size=%d", 
+		    current->pid, current->comm, ret, hdr->un.header.endian, 
+		    hdr->un.header.version, hdr->un.header.header_size);
+	}
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("leaving with ret value = %d", ret);
@@ -144,6 +158,7 @@ inm_s32_t iobuffer_sync_read(iobuffer_t *iob)
 inm_s32_t iobuffer_sync_flush(iobuffer_t *iob)
 {
 	inm_s32_t ret = 0;
+	bitmap_header_t *hdr = NULL;
 
 	if(IS_DBG_ENABLED(inm_verbosity, (INM_IDEBUG | INM_IDEBUG_BMAP))){
 		info("entered");
@@ -155,8 +170,25 @@ inm_s32_t iobuffer_sync_flush(iobuffer_t *iob)
 	if (INM_ATOMIC_READ(&iob->locked) > 0)
 		return -EBUSY;
 
+	/* Only log header writes (offset=0, size=16384) to avoid flooding */
+	if (iob->starting_offset == 0 && iob->size == LOG_HEADER_SIZE) {
+		if (iob->size >= sizeof(bitmap_header_t)) {
+			hdr = (bitmap_header_t *)iob->buffer;
+			dbg("[PID=%d %s] iobuffer_sync_flush: About to write header offset=%llu, size=%u, endian=%d, version=0x%x, recovery_state=%d, fs->fs_raw_hdl=%p", 
+			    current->pid, current->comm, iob->starting_offset, iob->size, 
+			    hdr->un.header.endian, hdr->un.header.version, hdr->un.header.recovery_state,
+			    iob->bapi->fs->fs_raw_hdl);
+		}
+	}
+
 	ret = fstream_write(iob->bapi->fs, iob->buffer, iob->size, 
 							iob->starting_offset);
+	
+	if (iob->starting_offset == 0 && iob->size == LOG_HEADER_SIZE) {
+		dbg("[PID=%d %s] iobuffer_sync_flush: Header write complete (ret=%d)", 
+		    current->pid, current->comm, ret);
+	}
+	
 	if (!ret)
 		iob->dirty = 0;
 

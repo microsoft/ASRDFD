@@ -351,6 +351,12 @@ typedef struct _target_context {
 	inm_u64_t	    tc_nr_xm_mapin_failures;
 	inm_wait_queue_head_t tc_wq_in_flight_ios;
 	inm_atomic_t    tc_nr_in_flight_ios;
+#ifdef INM_QUEUE_RQ_ENABLED
+	inm_atomic_t    tc_nr_queue_rq_bios;
+#ifdef INM_QUEUE_RQS_ENABLED
+	inm_atomic_t    tc_nr_queue_rqs_bios;
+#endif
+#endif
 	UDIRTY_BLOCK_V2 *tc_db_v2;
 	inm_u64_t       tc_dbwait_event_ts_in_usec;
 	inm_latency_stats_t tc_dbwait_notify_latstat;
