@@ -94,6 +94,16 @@ int INM_UNPIN(void *addr, size_t size)
 #define INM_KMEM_CACHE_FREE_PATH(cachep, objp, heap)				\
 						INM_KMEM_CACHE_FREE(cachep, objp)
 
+/* names_cachep removed in kernel 7.0; use kmalloc/kfree for path allocations */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#undef INM_KMEM_CACHE_ALLOC_PATH
+#undef INM_KMEM_CACHE_FREE_PATH
+#define INM_KMEM_CACHE_ALLOC_PATH(cachep, flags, size, heap)			\
+						((char *)kmalloc(size, flags))
+#define INM_KMEM_CACHE_FREE_PATH(cachep, objp, heap)				\
+						kfree(objp)
+#endif
+
 #define INM_MEMPOOL_CREATE(min_nr, alloc_slab, free_slab, cachep)	\
 	mempool_create(min_nr, alloc_slab, free_slab, cachep)
 #define INM_MEMPOOL_FREE(objp, poolp)           inm_mempool_free(objp, poolp)

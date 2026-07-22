@@ -83,7 +83,7 @@ typedef struct block_device inm_bio_dev_t;
 #endif  
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0) || \
-	defined SLES12SP4 || defined SLES12SP5 || defined SLES15
+	defined SLES12SP4 || defined SLES12SP5 || defined SLES15 || defined SLES16
 #define inm_bio_error(bio) ((bio)->bi_status)
 #else
 #define inm_bio_error(bio) ((bio)->bi_error)
@@ -180,7 +180,7 @@ typedef unsigned short inm_bvec_iter_t;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)) || defined SLES12SP3
 
 #define INM_REQ_WRITE           REQ_OP_WRITE
-#if (defined(RHEL9) && !defined(RHEL9_0) && !defined(OL9UEK7)) || defined(SLES15SP5) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if (defined(RHEL9) && !defined(RHEL9_0) && !defined(OL9UEK7)) || defined(SLES15SP5) || defined(SLES16) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 /* Defining it as 100000000 to not match with any req_op */
 #define INM_REQ_WRITE_SAME      100000000
 #else
@@ -286,14 +286,14 @@ INM_IS_SUPPORTED_REQUEST_OP(struct bio *bio)
 
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4,8,0)    */
 
-/* 
- * For unsupported kernels, break build so we are forced to verify 
- * we are logging the right data.
+/*
+ * Combine bio request flags and bi_flags for change tracking.
+ * Different kernel versions store these fields differently.
  */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,20,0))
-#define INM_BIO_RW_FLAGS(bio)   (*bio = 0)
+#define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) | bio->bi_flags)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)) || defined SLES12SP3
-#define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) | bio->bi_flags) 
+#define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) | bio->bi_flags)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0))
 #define INM_BIO_RW_FLAGS(bio)   (inm_bio_rw(bio) << 32 | bio->bi_flags)
 #else

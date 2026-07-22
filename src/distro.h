@@ -76,6 +76,17 @@
 #endif
 #endif
 
+#if (defined suse && DISTRO_VER == 16)
+#define SLES16
+#endif
+
+/* Debian */
+#if (defined debian && DISTRO_VER == 12)
+#define DEBIAN12
+#elif (defined debian && DISTRO_VER == 13)
+#define DEBIAN13
+#endif
+
 /* RHEL */
 #if (defined redhat && DISTRO_VER == 10)
 #define RHEL10
