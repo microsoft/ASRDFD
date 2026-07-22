@@ -33,7 +33,7 @@ ifeq (, $(VERSION_MINOR))
 endif
 
 ifeq (, $(VERSION_BUILDNUM))
-	VERSION_BUILDNUM:=6
+	VERSION_BUILDNUM:=7
 endif
 
 ifeq (, $(VERSION_PRIVATE))
@@ -87,8 +87,8 @@ ifeq ($(findstring suse, $(VENDOR)), suse)
 		endif
 	else
 		DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
-				grep VERSION= /etc/os-release | cut -d"\"" -f 2 | \
-				cut -d"-" -f 1)
+				grep '^VERSION=' /etc/os-release | cut -d"\"" -f 2 | \
+				cut -d"-" -f 1 | cut -d"." -f 1)
 		PATCH_LEVEL:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
 				grep -o -- -SP[0-9] /etc/os-release | cut -d"P" -f 2)
 		VENDOR:=suse
@@ -100,6 +100,12 @@ ifeq ($(findstring suse, $(VENDOR)), suse)
 	ifeq ($(DISTRO_VER), 12)
 		INM_CFLAGS += -mindirect-branch=thunk-inline -mindirect-branch-register
 	endif
+endif
+
+ifeq ($(findstring debian, $(VENDOR)), debian)
+	DISTRO_VER:=$(shell export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH;\
+			cat /etc/debian_version | cut -d"." -f 1 | cut -d"/" -f 1)
+	INM_CFLAGS += -DDISTRO_VER=${DISTRO_VER}
 endif
 
 ifeq ($(findstring redhat, $(VENDOR)), redhat)
@@ -195,6 +201,17 @@ ifeq ($(findstring redhat, $(VENDOR)), redhat)
 
 	ifeq ($(findstring 5.14.0-611, $(KDIR)), 5.14.0-611)
 		INM_CFLAGS += -DRHEL9_7
+	endif
+
+	# Define RHEL9_8_OR_LATER for kernel versions 5.14.0-650 and above
+	# RHEL 9.8 kernel is 5.14.0-687. This covers 9.8+ without listing future versions.
+	ifeq ($(findstring 5.14.0, $(KDIR)), 5.14.0)
+		RHEL9_BUILD_NUM := $(shell echo $(KDIR) | grep -oE '5\.14\.0-[0-9]+' | cut -d'-' -f2)
+		ifneq ($(RHEL9_BUILD_NUM),)
+			ifeq ($(shell test $(RHEL9_BUILD_NUM) -ge 650 2>/dev/null && echo true), true)
+				INM_CFLAGS += -DRHEL9_8_OR_LATER
+			endif
+		endif
 	endif
 
 	ifeq ($(findstring uek, $(KDIR)), uek)

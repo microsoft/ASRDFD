@@ -1,4 +1,4 @@
-﻿/* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* Copyright (C) 2022 Microsoft Corporation
  *
@@ -219,7 +219,7 @@ inm_exchange_strategy(host_dev_ctx_t *hdcp)
 			(void)xchg(&q_info->q->make_request_fn, 
 				  		q_info->orig_make_req_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 			(void)xchg(&q_info->q->disk->queue_kobj.ktype, q_info->orig_kobj_type);
 #else
 			(void)xchg(&q_info->q->kobj.ktype, q_info->orig_kobj_type);
@@ -370,7 +370,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&bdev->bd_disk->queue->kobj);
@@ -389,7 +389,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 #endif
 	q_info->q = q;
 	
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	if (q->disk->queue_kobj.ktype) {
 		memcpy_s(&(q_info->mod_kobj_type), sizeof(struct kobj_type),
 			q->disk->queue_kobj.ktype, sizeof(struct kobj_type));
@@ -409,7 +409,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	INM_ATOMIC_SET(&q_info->vol_users, 0);
 
 	q_info->mod_kobj_type.release = flt_queue_obj_rel;
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info->orig_kobj_type =  q->disk->queue_kobj.ktype;
 #else
 	q_info->orig_kobj_type =  q->kobj.ktype;
@@ -430,7 +430,7 @@ alloc_and_init_qinfo(inm_block_device_t *bdev, target_context_t *ctx)
 	/* now exchange pointers for make_request function and kobject type */
 	(void)xchg(&q->make_request_fn, &flt_make_request_fn);
 #endif
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	(void)xchg(&q->disk->queue_kobj.ktype, &q_info->mod_kobj_type);
 #else
 	(void)xchg(&q->kobj.ktype, &q_info->mod_kobj_type);
@@ -1183,13 +1183,41 @@ static void
 flt_orig_endio(struct bio *bio, inm_s32_t error)
 {
 	dbg("ENDIO: %p", bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+	/*
+	 * Since kernel 6.19, bio_chain_endio() is a sentinel function that
+	 * unconditionally calls BUG(). It must never be called directly.
+	 * The kernel's bio_endio() detects the sentinel by checking
+	 * bi_end_io == bio_chain_endio and handles chained bios via
+	 * __bio_chain_endio() internally. We must route all bio completions
+	 * through bio_endio() instead of calling bi_end_io() directly,
+	 * since we cannot distinguish chained vs non-chained bios here
+	 * (bio_chain_endio is not exported).
+	 */
+	bio_endio(bio);
+#else
 	if (bio->bi_end_io)
 		return bio->bi_end_io(bio);
+#endif
 }
 
 void 
 flt_end_io_fn(struct bio *bio)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+	/*
+	 * Since kernel 6.19, the block layer no longer advances
+	 * bio->bi_iter on completion, so bi_size stays at its original
+	 * value for both success and error bios. We must always reset
+	 * it to 0 to match pre-6.19 behavior where bio_endio() consumed
+	 * bi_iter. This is critical for flt_copy_bio() which uses
+	 * INM_BUF_COUNT(bio) == 0 as the condition to free bio_info and
+	 * release the target context reference via put_tgt_ctxt().
+	 * Without this, error bios leak the tgt_ctx reference, preventing
+	 * volume cleanup and causing D-state hangs between CVT tests.
+	 */
+	INM_BUF_COUNT(bio) = 0;
+#else
 	dm_bio_info_t *bio_info = bio->bi_private;
 	target_context_t *ctx = (target_context_t *)bio_info->tc;
 
@@ -1203,6 +1231,7 @@ flt_end_io_fn(struct bio *bio)
 		}
 		INM_BUG_ON(INM_BUF_COUNT(bio) != 0);
 	}
+#endif
 
 	flt_end_io(bio, inm_bio_error(bio));
 }
@@ -1457,6 +1486,7 @@ int
 is_our_io(struct bio *biop) 
 {
 	struct bio_vec *bvecp = NULL;
+	struct address_space *mapping = NULL;
 	const inm_address_space_operations_t *a_opsp = NULL;
 	inma_ops_t *t_inma_opsp = NULL;
 	unsigned long lock_flag;
@@ -1517,22 +1547,27 @@ is_our_io(struct bio *biop)
 		return FALSE;
 	}
 
-	if (!bvecp->bv_page->mapping)
+	/*
+	 * Cache mapping once with READ_ONCE to prevent TOCTOU race.
+	 * The page can be freed and recycled between reads on PREEMPT
+	 * kernels, causing mapping to become a poison value.
+	 */
+	mapping = READ_ONCE(bvecp->bv_page->mapping);
+
+	if (!mapping)
 	{
 		if (logErr) {
 			dbg("Invalid bio bvecp->bv_page->mapping: %p, bvecp = %p, bv_page = %p, mapping = %p", 
-					biop, bvecp, bvecp->bv_page, 
-					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+					biop, bvecp, bvecp->bv_page, mapping);
 		}
 		return FALSE;
 	}
 
-	if (!virt_addr_valid(bvecp->bv_page->mapping))
+	if (!virt_addr_valid(mapping))
 	{
 		if (logErr) {
 			dbg("Invalid bio virt_addr_valid: %p, bvecp = %p, bv_page = %p, mapping = %p", 
-					biop, bvecp, bvecp->bv_page, 
-					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+					biop, bvecp, bvecp->bv_page, mapping);
 		}
 		return FALSE;
 	}
@@ -1540,19 +1575,18 @@ is_our_io(struct bio *biop)
 	{	
 		if (logErr) {	
 			dbg("Invalid bio PageAnon: %p, bvecp = %p, bv_page = %p, mapping = %p", 
-					biop, bvecp, bvecp->bv_page, 
-					(bvecp->bv_page ? bvecp->bv_page->mapping : NULL));
+					biop, bvecp, bvecp->bv_page, mapping);
 		}
 		return FALSE;
 	}
 
 #ifdef INM_RECUSIVE_ADSPC 
-	a_opsp = bvecp->bv_page->mapping;
+	a_opsp = mapping;
 #else
-	if (!bvecp->bv_page->mapping->a_ops)
+	if (!mapping->a_ops)
 		return FALSE;
 
-	a_opsp = bvecp->bv_page->mapping->a_ops;
+	a_opsp = mapping->a_ops;
 #endif
 
 	lock_inmaops(FALSE, &lock_flag);
@@ -1561,8 +1595,7 @@ is_our_io(struct bio *biop)
 	unlock_inmaops(FALSE, &lock_flag);
 	if (t_inma_opsp) {
 #ifdef INM_RECUSIVE_ADSPC
-		INM_BUG_ON(t_inma_opsp->ia_mapping != 
-				  		bvecp->bv_page->mapping);
+		INM_BUG_ON(t_inma_opsp->ia_mapping != mapping);
 #endif
 		dbg("Recursive write: Lookup = %p, Mapping = %p", 
 				  			t_inma_opsp, a_opsp);
@@ -2061,7 +2094,7 @@ blk_status_t inm_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 			 					lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7)  || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER)  || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&q->kobj);
@@ -2089,7 +2122,7 @@ out_orig_queue_rq_fn:
 }
 
 #ifdef INM_QUEUE_RQS_ENABLED
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0) || defined(RHEL9_7) || (defined(RHEL10) && UPDATE != 0) || (defined(debian) && LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || (defined(RHEL10) && UPDATE != 0) || defined(SLES16) || defined(DEBIAN13) || (defined(DEBIAN12) && LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
 void inm_queue_rqs(struct rq_list *rqlist)
 #else
 void inm_queue_rqs(struct request **rqlist)
@@ -2109,7 +2142,7 @@ void inm_queue_rqs(struct request **rqlist)
 	/* Acquire lock once and look up context once for the entire batch */
 	INM_SPIN_LOCK_IRQSAVE(&driver_ctx->dc_host_info.rq_list_lock, 
 							lock_flag);
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	q_info = get_qinfo_from_kobj(&q->disk->queue_kobj);
 #else
 	q_info = get_qinfo_from_kobj(&q->kobj);
@@ -2180,7 +2213,7 @@ flt_make_request_fn(struct request_queue *q, struct bio *bio)
 		orig_make_request_fn = q_info->orig_make_req_fn;
 	}else{
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0) || defined SLES12SP4 || \
-				defined SLES12SP5 || defined SLES15
+				defined SLES12SP5 || defined SLES15 || defined SLES16
 		struct request_queue *q = bio->bi_disk->queue;
 #else
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
@@ -2235,7 +2268,7 @@ flt_make_request_fn(struct request_queue *q, struct bio *bio)
 			INM_UP_READ(&driver_ctx->tgt_list_sem);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0) || defined SLES12SP4 || \
-				defined SLES12SP5 || defined SLES15
+				defined SLES12SP5 || defined SLES15 || defined SLES16
 			bio->bi_status = BLK_STS_IOERR;
 #else
 			bio->bi_error = -EIO;
@@ -2431,7 +2464,7 @@ void flt_disk_obj_rel(struct kobject *kobj)
 	if (!disk->queue)
 		goto out;
 
-#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 	qkobj = &disk->queue_kobj;
 #else
 	qkobj = &disk->queue->kobj;
@@ -2487,7 +2520,11 @@ static inm_s32_t completion_check_endio(struct bio *bio, inm_u32_t done,
 	req = bio->bi_private;
 	ctx = req->ctx;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	if(in_hardirq()) {
+#else
 	if(in_irq()) {
+#endif
 		dbg("Completion called in Interrupt context for %s", ctx->tc_guid);
 		ctx->tc_lock_fn = volume_lock_irqsave;
 		ctx->tc_unlock_fn = volume_unlock_irqrestore;

@@ -38,8 +38,11 @@
 #include <linux/dcache.h>
 #include <linux/fs_struct.h>
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || defined(SLES15SP6) || defined(SLES15SP7)
 #include <linux/filelock.h>
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,18,0)
+#include <linux/namei.h>
 #endif
 
 extern driver_context_t *driver_ctx;
@@ -505,6 +508,9 @@ inm_mkdir(char *dir_name, inm_s32_t mode)
 			break;
 		}
 		dir = inm_lookup_create(&nameidata, 1);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,18,0)
+		dir = start_creating_path(AT_FDCWD, tmp, &nameidata.path,
+							LOOKUP_DIRECTORY);
 #else
 		dir = kern_path_create(AT_FDCWD, tmp, &nameidata.path,
 							LOOKUP_DIRECTORY);
@@ -519,7 +525,29 @@ inm_mkdir(char *dir_name, inm_s32_t mode)
 				mode &= ~current->fs->umask;
 			dbg("Coming in inm_mkdir befor vfs_mkdir\n");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+			/* vfs_mkdir returns struct dentry * and takes delegated_inode.
+			 * NULL delegation is safe: ASR only creates local appliance paths,
+			 * so delegation retry (as done in __inm_unlink) is not needed.
+			 * Assign dir unconditionally so cleanup uses the correct dentry. */
+			dir = vfs_mkdir(mnt_idmap(nameidata.path.mnt),
+						nameidata.path.dentry->d_inode,
+						dir, mode, NULL);
+			if (IS_ERR(dir))
+				err = PTR_ERR(dir);
+			else
+				err = 0;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
+			/* vfs_mkdir returns struct dentry * since 6.16.
+			 * Assign dir unconditionally so cleanup uses the correct dentry. */
+			dir = vfs_mkdir(mnt_idmap(nameidata.path.mnt),
+						nameidata.path.dentry->d_inode,
+						dir, mode);
+			if (IS_ERR(dir))
+				err = PTR_ERR(dir);
+			else
+				err = 0;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || defined(SLES15SP6) || defined(SLES15SP7)
 			err = vfs_mkdir(mnt_idmap(nameidata.path.mnt),
 						nameidata.path.dentry->d_inode,
 						dir, mode);
@@ -550,6 +578,8 @@ inm_mkdir(char *dir_name, inm_s32_t mode)
 			dbg("Coming in inm_mkdir after vfs_mkdir\n");
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 13)
 			dput(dir);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6,18,0)
+			end_creating_path(&nameidata.path, dir);
 #else
 			done_path_create(&nameidata.path, dir);
 #endif
@@ -604,7 +634,11 @@ __inm_unlink(const char * pathname, char *parent_path)
 	struct file     *parent_hdl = NULL;
 	struct path		path;
 	struct dentry	*dentry = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+	struct delegated_inode deleg = { };
+#else
 	struct inode    *deleg = NULL;
+#endif
 	int             retry = 0;
    
 	dbg("Unlink called on %s, parent = %s", pathname, parent_path);
@@ -617,7 +651,11 @@ __inm_unlink(const char * pathname, char *parent_path)
 		parent_inode = INM_HDL_TO_INODE(parent_hdl);
 
 		do {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+			deleg = (struct delegated_inode){ };
+#else
 			deleg = NULL;
+#endif
 			retry = 0;
 
 			error = kern_path(name, 0, &path);
@@ -633,7 +671,7 @@ __inm_unlink(const char * pathname, char *parent_path)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(RHEL9_7) || defined(SLES15SP6) || defined(SLES15SP7)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,5,0) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || defined(SLES15SP6) || defined(SLES15SP7)
 				error = vfs_unlink(mnt_idmap(path.mnt),
 							parent_inode,
 							dentry, &deleg);
@@ -646,7 +684,11 @@ __inm_unlink(const char * pathname, char *parent_path)
 				error = vfs_unlink(parent_inode, dentry,
 							&deleg);
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+				if (error && !is_delegated(&deleg))
+#else
 				if (error && !deleg)
+#endif
 					err("vfs_unlink failed with error %d",
 								error);
 		
@@ -661,6 +703,16 @@ __inm_unlink(const char * pathname, char *parent_path)
 				dbg("Path lookup failed: %d", error);
 			}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+			if (is_delegated(&deleg)) {
+				error = break_deleg_wait(&deleg);
+				if (error)
+					err("Cannot break delegation, error %d",
+								error);
+				else
+					retry = 1;
+			}
+#else
 			if (deleg) {
 				error = break_deleg_wait(&deleg);
 				if (error)
@@ -669,6 +721,7 @@ __inm_unlink(const char * pathname, char *parent_path)
 				else
 					retry = 1;
 			}
+#endif
 		} while(retry);
 		/* cant use deleg as deleg=NULL in break_deleg_wait()*/
 

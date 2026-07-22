@@ -54,6 +54,14 @@
 
 #include "distro.h"
 
+/*
+ * READ_ONCE was introduced in kernel 3.19 as a replacement for ACCESS_ONCE.
+ * Provide a compat shim for older kernels (OL7 UEK3, early RHEL7).
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0) && !defined(READ_ONCE)
+#define READ_ONCE(x) ACCESS_ONCE(x)
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
 #include <linux/time.h>
 #else
@@ -90,7 +98,7 @@
 #define HAVE_BI_SIZE
 #endif
 
-#if defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+#if defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 #ifndef INM_FILP_FOR_BDEV_ENABLED
 #define INM_FILP_FOR_BDEV_ENABLED
 #endif
@@ -546,7 +554,7 @@ typedef struct completion		inm_completion_t;
 		init_completion(event)
 #define INM_DESTROY_COMPLETION(compl)
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 #define INM_COMPLETE_AND_EXIT(event, val)				\
 		kthread_complete_and_exit(event, val)
 #else
@@ -816,6 +824,19 @@ int _inm_xm_mapin(struct _target_context *, void *, char **);
  */
 #define INM_IMB_ERROR_SET(var, error_value) 
 #define INM_MIRROR_IODONE(fn, bp, done, error) fn(inm_buf_t *bp)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,19,0)
+/*
+ * Since kernel 6.19, bio_chain_endio() is a sentinel that calls BUG() if
+ * invoked directly. Must use bio_endio() which handles the sentinel check.
+ */
+#define INM_PT_IODONE(mbufinfo)                                                 	\
+{                                                                               	\
+	mbufinfo->imb_org_bp->bi_flags = mbufinfo->imb_pt_buf.bi_flags;         	\
+	INM_BUF_COUNT(mbufinfo->imb_org_bp) = INM_BUF_COUNT(&(mbufinfo->imb_pt_buf));   \
+	inm_bio_error(mbufinfo->imb_org_bp) = inm_bio_error(&(mbufinfo->imb_pt_buf));   \
+	bio_endio(mbufinfo->imb_org_bp);                                                \
+}
+#else
 #define INM_PT_IODONE(mbufinfo)                                                 	\
 {                                                                               	\
 	mbufinfo->imb_org_bp->bi_flags = mbufinfo->imb_pt_buf.bi_flags;         	\
@@ -823,6 +844,7 @@ int _inm_xm_mapin(struct _target_context *, void *, char **);
 	inm_bio_error(mbufinfo->imb_org_bp) = inm_bio_error(&(mbufinfo->imb_pt_buf));   \
 	mbufinfo->imb_org_bp->bi_end_io(mbufinfo->imb_org_bp);                          \
 }
+#endif
 
 #define INM_BUF_FAILED(bp, error) 		inm_bio_error(bp)
 
@@ -962,7 +984,7 @@ inm_s32_t inm_blkdev_get(inm_bio_dev_t *bdev);
 #endif
 #endif
 
-#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+#if defined(RHEL9_2) || defined(RHEL9_3) || defined(RHEL9_4) || defined(RHEL9_5) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 typedef struct {
     /* empty dummy */
 } mm_segment_t;
@@ -977,7 +999,7 @@ typedef struct {
 })
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) || defined(RHEL9_6) || defined(RHEL9_7)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) || defined(RHEL9_6) || defined(RHEL9_7) || defined(RHEL9_8_OR_LATER)
 #define inm_freeze_bdev(__bdev, __sb)   bdev_freeze(__bdev)
 #define inm_thaw_bdev(__bdev, __sb)     bdev_thaw(__bdev)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
