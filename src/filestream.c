@@ -19,6 +19,7 @@
 
 #include <linux/dcache.h>
 #include <linux/mount.h>
+#include <linux/jiffies.h>
 
 #include "involflt.h"
 #include "involflt-common.h"
@@ -211,7 +212,17 @@ inm_s32_t fstream_open_or_create(fstream_t *fs, char *path,
 	ret = fstream_open(fs, path, oflags, 0644);
 
 	if (ret) {    // may be file does not exist, create it
-		dbg("Bitmap file not found (ret=%d), attempting to create: %s", ret, path);
+		/* DIAG: always log (err, not dbg) the errno from the initial
+		 * open-without-O_CREAT attempt before we silently fall back
+		 * to O_CREAT and mark the bitmap as newly-created (which
+		 * forces a full resync). jiffies lets us correlate this
+		 * against boot-time ordering (e.g. root fs / LVM not yet
+		 * settled) across repeated reboots without needing debug
+		 * verbosity enabled.
+		 */
+		err("bitmap file open (no O_CREAT) failed for %s, errno=%d, "
+		    "jiffies=%lu - falling back to O_CREAT (will force "
+		    "resync if file did not already exist)", path, ret, jiffies);
 		oflags |= O_CREAT;
 		c_ret = fstream_open(fs, path, oflags, 0644);
 		if (c_ret) {
