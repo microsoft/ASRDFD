@@ -101,6 +101,16 @@ typedef struct bvec_iter inm_bvec_iter_t;
 #define INM_BVEC_ITER_IDX(iter)     ((iter).bi_idx)
 #define INM_BVEC_ITER_SECTOR(iter)  ((iter).bi_sector)
 #define INM_BVEC_ITER_SZ(iter)      ((iter).bi_size)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7,3,0)
+#define INM_BVEC_ITER_BVDONE(iter)  ((iter).bi_offset)
+#define INM_BVEC_ITER_INIT()                                                \
+	((struct bvec_iter) {                                               \
+	    .bi_sector = 0,                                                 \
+	    .bi_size = 0,                                                   \
+	    .bi_idx = 0,                                                    \
+	    .bi_offset = 0,                                                 \
+	})
+#else
 #define INM_BVEC_ITER_BVDONE(iter)  ((iter).bi_bvec_done)
 
 #if !defined RHEL8 && ((LINUX_VERSION_CODE >= KERNEL_VERSION(4,13,0) &&     \
@@ -121,6 +131,7 @@ typedef struct bvec_iter inm_bvec_iter_t;
 	    .bi_idx = 0,                                                    \
 	    .bi_bvec_done = 0,                                              \
 	})
+#endif
 #endif
 
 #define INM_BUF_ITER(bio)           ((bio)->bi_iter)
